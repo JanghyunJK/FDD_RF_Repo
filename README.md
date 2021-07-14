@@ -25,3 +25,7 @@ Ensure that you have navigated to the top level of your cloned repository. You w
 Install the environment needed for this repository:
 
 `$ pip install -e .[dev]`
+
+ To-do list:
+  1. Add cross validation module
+  2. Add systematic feature extraction and selection module

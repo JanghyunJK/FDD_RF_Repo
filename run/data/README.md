@@ -1,0 +1,3 @@
+Download data from https://nrel.app.box.com/folder/75255495838?s=fzn8t5t72w8yvgjogs8zfyeix7djj3pi
+
+Make sure the directory is similar to data/TN_Knoxville/TN_Knoxville/...

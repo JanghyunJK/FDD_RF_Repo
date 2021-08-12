@@ -137,6 +137,7 @@ class FDD_RF_Modeling():
             # This method is introduced in https://www.sciencedirect.com/science/article/abs/pii/S0360132320307071
             else:
                 raise Exception("Error! Enter either 'None', 'Embedded' or 'Filter' for feature_selection_methodology")
+            pd.DataFrame(self.important_features, columns = ['important_features']).to_csv(f'results/important_features_{self.weather}.csv', index = None)
 
         elif train_or_test == 'test':
             # read and aggregate tesing data
@@ -151,6 +152,7 @@ class FDD_RF_Modeling():
                 fault_inputs = pd.concat([fault_inputs, temp_raw_FDD_data], axis = 0)
 
             fault_inputs = fault_inputs.reset_index(drop = True)
+            self.important_features = pd.read_csv(f'results/important_features_{self.weather}.csv')['important_features'].tolist()
             self.inputs_test = fault_inputs[self.important_features]
 
         else:

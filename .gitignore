@@ -4,3 +4,5 @@ run/models
 run/results
 run/*.csv
 run/data/Fault Runs
+JupyterNotebook/timestamp.csv
+JupyterNotebook/figures

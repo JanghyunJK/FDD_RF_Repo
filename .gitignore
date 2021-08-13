@@ -1,0 +1,6 @@
+# training data
+run/data
+run/models
+run/results
+run/*.csv
+run/data/Fault Runs

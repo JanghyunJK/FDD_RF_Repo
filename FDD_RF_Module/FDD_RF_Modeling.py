@@ -94,9 +94,6 @@ class FDD_RF_Modeling():
 
             # Calculating outputs based on labeling methodology
             if self.labeling_methodology == 'Simple':
-
-                fault_inputs_output.to_csv("./output.csv")
-
                 self.output_train = fault_inputs_output.iloc[:,-1]
             elif self.labeling_methodology == 'Energy_Difference':
                 pd.set_option('mode.chained_assignment', None)

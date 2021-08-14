@@ -46,11 +46,11 @@ class FDD_RF_Modeling():
             training and testing
 
     """
-    def __init__(self, weather = 'TN_Knoxville', labeling_methodolog = 'Simple',
+    def __init__(self, weather = 'TN_Knoxville', labeling_methodology = 'Simple',
      feature_selection_methodology = 'None', aggregate_n_runs = 4,
      number_of_trees = 20, randomseed=2021):
         self.weather = weather
-        self.labeling_methodolog = labeling_methodolog
+        self.labeling_methodology = labeling_methodology
         self.feature_selection_methodology = feature_selection_methodology
         self.number_of_trees = number_of_trees
         self.aggregate_n_runs = aggregate_n_runs
@@ -103,9 +103,9 @@ class FDD_RF_Modeling():
             fault_inputs_output = fault_inputs_output.reset_index(drop = True)
 
             # Calculating outputs based on labeling methodology
-            if self.labeling_methodolog == 'Simple':
+            if self.labeling_methodology == 'Simple':
                 self.output_train = fault_inputs_output.iloc[:,-1]
-            elif self.labeling_methodolog == 'Energy_Difference':
+            elif self.labeling_methodology == 'Energy_Difference':
                 pd.set_option('mode.chained_assignment', None)
                 electricity_gas_label_df = fault_inputs_output[['electricity_facility [W]', 'gas_facility [W]', 'label']]
                 baseline_electricity = electricity_gas_label_df.loc[electricity_gas_label_df.label == 'baseline']['electricity_facility [W]']
@@ -121,7 +121,7 @@ class FDD_RF_Modeling():
                 electricity_gas_label_df['adjusted_label'] = electricity_gas_label_df['adjusted_label'].replace('', 'baseline')
                 self.output_train = electricity_gas_label_df['adjusted_label'].rename('label')
             else:
-                raise Exception("Error! Enter either 'Simple' or 'Energy_Difference' for labeling_methodolog")
+                raise Exception("Error! Enter either 'Simple' or 'Energy_Difference' for labeling_methodology")
 
             # Calculating inputs based on feature selection methods
             if self.feature_selection_methodology == 'None':

@@ -5,7 +5,8 @@ test_run = FDD_RF_Modeling(
     labeling_methodology = 'Simple',
     feature_selection_methodology = 'Embedded',
     aggregate_n_runs = 6 * 24,
-    number_of_trees = 2
+    number_of_trees = 4,
+    randomseed=20210813
     )
 
 test_run.whole_process_training_and_testing()

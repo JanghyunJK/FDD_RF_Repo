@@ -5,6 +5,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import mean_squared_error
 from sklearn.feature_selection import SelectKBest, f_classif
+from sklearn.model_selection import train_test_split
 
 class FDD_RF_Modeling():
     """
@@ -47,12 +48,13 @@ class FDD_RF_Modeling():
     """
     def __init__(self, weather = 'TN_Knoxville', labeling_methodology = 'Simple',
      feature_selection_methodology = 'None', aggregate_n_runs = 4,
-     number_of_trees = 20):
+     number_of_trees = 20, randomseed=2021):
         self.weather = weather
         self.labeling_methodology = labeling_methodology
         self.feature_selection_methodology = feature_selection_methodology
         self.number_of_trees = number_of_trees
         self.aggregate_n_runs = aggregate_n_runs
+        self.randomseed = randomseed
         self.root_path = os.getcwd()
 
     def CDDR_tot(self, Real_label, Pred_label):
@@ -86,10 +88,18 @@ class FDD_RF_Modeling():
 
             for simulation_data_file_name in simulation_data_file_list:
                 temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{simulation_data_file_name}')
+                #temp_raw_FDD_data = temp_raw_FDD_data.apply(pd.to_numeric, errors='coerce')
+                #temp_raw_FDD_data = temp_raw_FDD_data.dropna()
                 temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (self.aggregate_n_runs)).mean().iloc[:,0:-8]
                 temp_raw_FDD_data['label'] = meta_data.loc[meta_data.id == simulation_data_file_name[0:-12]].fault_type.values[0]
-                fault_inputs_output = pd.concat([fault_inputs_output, temp_raw_FDD_data], axis = 0)
+                # Splitting training and testing data
+                temp_raw_FDD_data_train, temp_raw_FDD_data_test = train_test_split(temp_raw_FDD_data, test_size=0.2, random_state=np.random.RandomState(self.randomseed))
+                fault_inputs_output = pd.concat([fault_inputs_output, temp_raw_FDD_data_train], axis = 0)
+                print('Split and save test data for ' + simulation_data_file_name)
+                temp_raw_FDD_data_test.to_csv(f'data\\testing_data\\{simulation_data_file_name}')
 
+            ind = pd.DataFrame(temp_raw_FDD_data_test.index.tolist())
+            ind.to_csv('ind.csv')
             fault_inputs_output = fault_inputs_output.reset_index(drop = True)
 
             # Calculating outputs based on labeling methodology

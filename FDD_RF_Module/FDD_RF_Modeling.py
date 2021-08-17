@@ -85,11 +85,10 @@ class FDD_RF_Modeling():
             meta_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{meta_data_file_name}')
 
             fault_inputs_output = pd.DataFrame([])
+            fault_inputs_output_test = pd.DataFrame([])
 
             for simulation_data_file_name in simulation_data_file_list:
                 temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{simulation_data_file_name}')
-                #temp_raw_FDD_data = temp_raw_FDD_data.apply(pd.to_numeric, errors='coerce')
-                #temp_raw_FDD_data = temp_raw_FDD_data.dropna()
                 temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (self.aggregate_n_runs)).mean().iloc[:,0:-8]
                 temp_raw_FDD_data['label'] = meta_data.loc[meta_data.id == simulation_data_file_name[0:-12]].fault_type.values[0]
                 # Splitting training and testing data
@@ -154,16 +153,18 @@ class FDD_RF_Modeling():
             test_data_file_name_list = os.listdir(f'data\\testing_data\\')
             self.test_simulation_data_file_list = [x for x in test_data_file_name_list if '_sensors' in x]
 
-            fault_inputs = pd.DataFrame([])
+            fault_inputs_output_test = pd.DataFrame([])
 
             for simulation_data_file_name in self.test_simulation_data_file_list:
-                temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{simulation_data_file_name}')
-                temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (self.aggregate_n_runs)).mean().iloc[:,0:-8]
-                fault_inputs = pd.concat([fault_inputs, temp_raw_FDD_data], axis = 0)
+                temp_raw_FDD_data_test = pd.read_csv(f'data\\testing_data\\{simulation_data_file_name}')
+                fault_inputs_output_test = pd.concat([fault_inputs_output_test, temp_raw_FDD_data_test], axis = 0)
 
-            fault_inputs = fault_inputs.reset_index(drop = True)
+            fault_inputs_output_test = fault_inputs_output_test.reset_index(drop = True)
             self.important_features = pd.read_csv(f'results/important_features_{self.weather}.csv')['important_features'].tolist()
-            self.inputs_test = fault_inputs[self.important_features]
+            self.inputs_test = fault_inputs_output_test[self.important_features]
+
+            if self.labeling_methodolog == 'Simple':
+                self.output_test = fault_inputs_output_test.iloc[:,-1]
 
         else:
             raise Exception("Error! Enter either 'train' or 'test' for train_or_test")
@@ -191,10 +192,25 @@ class FDD_RF_Modeling():
             raise Exception ("Error! Enter either 'train' or 'load' for train_or_load_model")
 
     def make_predictions(self):
-        self.output_test = self.model.predict(self.inputs_test)
-        prediction_order = ''.join(self.test_simulation_data_file_list)
-        pd.DataFrame(self.output_test, columns = ['output_test' + prediction_order]).to_csv(f'results/{self.weather}.csv', index = None)
         print('Make and saving predictions...')
+        self.output_test_predicted = self.model.predict(self.inputs_test)
+        self.testing_accuracy_CDDR = self.CDDR_tot(self.output_test, self.output_test_predicted)
+        prediction_order = ''.join(self.test_simulation_data_file_list)
+        pd.DataFrame(self.output_test_predicted, columns = ['output_test' + prediction_order]).to_csv(f'results/{self.weather}.csv', index = None)
+        logpath = f'results/log.csv'
+        logdf = pd.DataFrame({'randomseed': self.randomseed,
+                            'weather': self.weather,
+                            'labeling methodology': self.labeling_methodolog,
+                            'feature selection methodology': self.feature_selection_methodology,
+                            'number of trees': self.number_of_trees,
+                            'aggregate n runs': self.aggregate_n_runs,
+                            'training CDDR': self.training_accuracy_CDDR,
+                            'testing CDDR': self.testing_accuracy_CDDR}, index=[0])
+        if not os.path.isfile(logpath):
+            logdf.to_csv(logpath, mode='a', index=False)
+        else:
+            logdf.to_csv(logpath, mode='a', index=False, header=False)
+        print(f'Training Model Completed! Testing Accuracy (CDDRtotal) is : {self.testing_accuracy_CDDR}')
         print('Whole Process Completed!')
 
     def whole_process_only_training(self):

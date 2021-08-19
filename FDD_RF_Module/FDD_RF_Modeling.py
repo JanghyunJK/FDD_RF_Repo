@@ -67,6 +67,19 @@ class FDD_RF_Modeling():
         CDDR_tot = CD / CP
         return CDDR_tot
 
+    def TPR_FPR_tot(self, Real_label, Pred_label):
+        TP, FP, TCP = 0, 0, 0
+        for i,j in zip(Real_label,Pred_label):
+            if (i != ('baseline')) & (j != ('baseline')):
+                TP += 1
+            if (i == {'baseline'}) & (j != ('baseline')):
+                FP += 1
+            if i != 'baseline':
+                TCP += 1
+        TPR = TP / TCP
+        FPR = FP / TCP
+        return TPR, FPR
+
     def create_folder_structure(self):
         print('Creating folder structure...')
         folders = ['models/', 'results/', 'data/']
@@ -195,6 +208,7 @@ class FDD_RF_Modeling():
         print('Make and saving predictions...')
         self.output_test_predicted = self.model.predict(self.inputs_test)
         self.testing_accuracy_CDDR = self.CDDR_tot(self.output_test, self.output_test_predicted)
+        self.testing_accuracy_TPR, self.testing_accuracy_FPR = self.TPR_FPR_tot(self.output_test, self.output_test_predicted)
         prediction_order = ''.join(self.test_simulation_data_file_list)
         pd.DataFrame(self.output_test_predicted, columns = ['output_test' + prediction_order]).to_csv(f'results/{self.weather}.csv', index = None)
         logpath = f'results/log.csv'
@@ -205,7 +219,9 @@ class FDD_RF_Modeling():
                             'number of trees': self.number_of_trees,
                             'aggregate n runs': self.aggregate_n_runs,
                             'training CDDR': self.training_accuracy_CDDR,
-                            'testing CDDR': self.testing_accuracy_CDDR}, index=[0])
+                            'testing CDDR': self.testing_accuracy_CDDR,
+                            'testing TPR': self.testing_accuracy_TPR,
+                            'testing FPR': self.testing_accuracy_FPR}, index=[0])
         if not os.path.isfile(logpath):
             logdf.to_csv(logpath, mode='a', index=False)
         else:

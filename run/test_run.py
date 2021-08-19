@@ -8,9 +8,9 @@ for x in randomseedpool:
     i += 1
     print('Starting run ' + str(i))
     test_run = FDD_RF_Modeling(weather = 'Norfolk', 
-                               labeling_methodolog = 'Simple',
+                               labeling_methodology = 'Simple',
                                feature_selection_methodology = 'Embedded', 
                                aggregate_n_runs = 6 * 24, 
-                               number_of_trees = 4,
+                               number_of_trees = 400,
                                randomseed=x)
     test_run.whole_process_training_and_testing()

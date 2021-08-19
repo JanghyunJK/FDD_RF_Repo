@@ -1,8 +1,8 @@
 # training data
-run/data
-run/models
+run/data/**/*.csv
+run/models/*.sav
 run/results
 run/*.csv
 run/data/Fault Runs
-JupyterNotebook/timestamp.csv
+JupyterNotebook/*.csv
 JupyterNotebook/figures

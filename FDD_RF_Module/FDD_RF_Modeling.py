@@ -98,7 +98,7 @@ class FDD_RF_Modeling():
                 temp_raw_FDD_data_test.to_csv(f'data\\testing_data\\{simulation_data_file_name}')
 
             ind = pd.DataFrame(temp_raw_FDD_data_test.index.tolist())
-            ind.to_csv('ind.csv')
+            ind.to_csv(f'data\\testing_data\\{self.weather}_ind.csv')
             fault_inputs_output = fault_inputs_output.reset_index(drop = True)
 
             # Calculating outputs based on labeling methodology
@@ -163,7 +163,7 @@ class FDD_RF_Modeling():
             self.important_features = pd.read_csv(f'results/important_features_{self.weather}.csv')['important_features'].tolist()
             self.inputs_test = fault_inputs_output_test[self.important_features]
 
-            if self.labeling_methodolog == 'Simple':
+            if self.labeling_methodology == 'Simple':
                 self.output_test = fault_inputs_output_test.iloc[:,-1]
 
         else:
@@ -200,7 +200,7 @@ class FDD_RF_Modeling():
         logpath = f'results/log.csv'
         logdf = pd.DataFrame({'randomseed': self.randomseed,
                             'weather': self.weather,
-                            'labeling methodology': self.labeling_methodolog,
+                            'labeling methodology': self.labeling_methodology,
                             'feature selection methodology': self.feature_selection_methodology,
                             'number of trees': self.number_of_trees,
                             'aggregate n runs': self.aggregate_n_runs,

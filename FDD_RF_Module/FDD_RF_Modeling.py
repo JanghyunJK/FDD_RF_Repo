@@ -64,7 +64,10 @@ class FDD_RF_Modeling():
                 CD += 1
             if i != 'baseline':
                 CP += 1
-        CDDR_tot = CD / CP
+        if CP ==0:
+            CDDR_tot = 0
+        else:
+            CDDR_tot = CD / CP
         return CDDR_tot
 
     def TPR_FPR_tot(self, Real_label, Pred_label):
@@ -101,6 +104,7 @@ class FDD_RF_Modeling():
             fault_inputs_output_test = pd.DataFrame([])
 
             for simulation_data_file_name in simulation_data_file_list:
+                print('Reading ' + simulation_data_file_name)
                 temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{simulation_data_file_name}')
                 temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (self.aggregate_n_runs)).mean().iloc[:,0:-8]
                 temp_raw_FDD_data['label'] = meta_data.loc[meta_data.id == simulation_data_file_name[0:-12]].fault_type.values[0]

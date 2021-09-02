@@ -96,9 +96,11 @@ class FDD_RF_Modeling():
         if train_or_test == 'train':
             # read and aggregate raw data
             data_file_name_list = os.listdir(f'data\\{self.weather}\\{self.weather}\\')
-            meta_data_file_name = [x for x in data_file_name_list if '_sensors' not in x][0]
-            simulation_data_file_list = [x for x in data_file_name_list if '_sensors' in x]
+            meta_data_file_name = [x for x in data_file_name_list if '_metadata' in x][0]
+            simulation_data_file_list = [x for x in data_file_name_list if '_metadata' not in x]
             meta_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{meta_data_file_name}')
+
+            print('metadata filename: ' + meta_data_file_name)
 
             fault_inputs_output = pd.DataFrame([])
             fault_inputs_output_test = pd.DataFrame([])
@@ -107,7 +109,7 @@ class FDD_RF_Modeling():
                 print('Reading ' + simulation_data_file_name)
                 temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{simulation_data_file_name}')
                 temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (self.aggregate_n_runs)).mean().iloc[:,0:-8]
-                temp_raw_FDD_data['label'] = meta_data.loc[meta_data.id == simulation_data_file_name[0:-12]].fault_type.values[0]
+                temp_raw_FDD_data['label'] = meta_data.loc[meta_data.sensor_filename == simulation_data_file_name[0:-4]].fault_type.values[0]
                 # Splitting training and testing data
                 temp_raw_FDD_data_train, temp_raw_FDD_data_test = train_test_split(temp_raw_FDD_data, test_size=0.2, random_state=np.random.RandomState(self.randomseed))
                 fault_inputs_output = pd.concat([fault_inputs_output, temp_raw_FDD_data_train], axis = 0)

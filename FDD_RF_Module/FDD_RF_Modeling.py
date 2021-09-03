@@ -85,36 +85,36 @@ class FDD_RF_Modeling():
         return TPR, FPR
 
     def create_folder_structure(self):
-        print('Creating folder structure...')
+        print('[Preprocessing] creating folder structure...')
         folders = ['models/', 'results/', 'data/']
         for folder in folders:
             if not os.path.exists(os.path.join(self.root_path, folder)):
                 os.makedirs(os.path.join(self.root_path, folder))
 
     def inputs_output_generator(self, train_or_test):
-        print(f'Generating inputs for {train_or_test}ing...')
+        print(f'[Training/Testing Data Processing] generating inputs for {train_or_test}ing...')
 
         if train_or_test == 'train':
             # read and aggregate raw data
-            data_file_name_list = [os.path.basename(x) for x in glob.glob(f"data\\{(self.weather)}\\{self.weather}\\*.csv")]
+            data_file_name_list = [os.path.basename(x) for x in glob.glob(f"data\\{(self.weather)}\\*.csv")]
             meta_data_file_name = [x for x in data_file_name_list if '_metadata' in x][0]
             simulation_data_file_list = [x for x in data_file_name_list if '_metadata' not in x]
-            meta_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{meta_data_file_name}')
+            meta_data = pd.read_csv(f'data\\{self.weather}\\{meta_data_file_name}')
 
-            print('metadata filename: ' + meta_data_file_name)
+            print('[Training/Testing Data Processing] metadata filename: ' + meta_data_file_name)
 
             fault_inputs_output = pd.DataFrame([])
             fault_inputs_output_test = pd.DataFrame([])
 
             for simulation_data_file_name in simulation_data_file_list:
-                print('Reading ' + simulation_data_file_name)
-                temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{simulation_data_file_name}')
+                print('[Training/Testing Data Processing] reading data (for both training and testing): ' + simulation_data_file_name)
+                temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{simulation_data_file_name}')
                 temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (self.aggregate_n_runs)).mean().iloc[:,0:-8]
                 temp_raw_FDD_data['label'] = meta_data.loc[meta_data.sensor_filename == simulation_data_file_name[0:-4]].fault_type.values[0]
                 # Splitting training and testing data
                 temp_raw_FDD_data_train, temp_raw_FDD_data_test = train_test_split(temp_raw_FDD_data, test_size=0.2, random_state=np.random.RandomState(self.randomseed))
                 fault_inputs_output = pd.concat([fault_inputs_output, temp_raw_FDD_data_train], axis = 0)
-                print('Split and save test data for ' + simulation_data_file_name)
+                print('[Training/Testing Data Processing] split and save testing data for ' + simulation_data_file_name)
                 temp_raw_FDD_data_test.to_csv(f'data\\testing_data\\{simulation_data_file_name}')
 
             ind = pd.DataFrame(temp_raw_FDD_data_test.index.tolist())
@@ -176,11 +176,13 @@ class FDD_RF_Modeling():
             fault_inputs_output_test = pd.DataFrame([])
 
             for simulation_data_file_name in self.test_simulation_data_file_list:
+                print('[Testing Data Processing] reading testing data ' + simulation_data_file_name)
                 temp_raw_FDD_data_test = pd.read_csv(f'data\\testing_data\\{simulation_data_file_name}')
                 fault_inputs_output_test = pd.concat([fault_inputs_output_test, temp_raw_FDD_data_test], axis = 0)
 
             fault_inputs_output_test = fault_inputs_output_test.reset_index(drop = True)
             self.important_features = pd.read_csv(f'results/important_features_{self.weather}.csv')['important_features'].tolist()
+            print('[Testing Data Processing] filtering data only with important features')
             self.inputs_test = fault_inputs_output_test[self.important_features]
 
             if self.labeling_methodology == 'Simple':
@@ -192,7 +194,7 @@ class FDD_RF_Modeling():
     def get_models(self, train_or_load_model):
 
         if train_or_load_model == 'train':
-            print(f'Training Model...')
+            print(f'[Training Model] training model...')
 
             FDD_model = RandomForestClassifier(n_estimators = self.number_of_trees, random_state=42)
             FDD_model.fit(self.inputs_train, self.output_train)
@@ -201,18 +203,18 @@ class FDD_RF_Modeling():
             self.training_accuracy_CDDR = self.CDDR_tot(self.output_train, self.output_train_predicted)
             self.model = FDD_model
             pickle.dump(self.model, open(f'models/{self.weather}.sav', 'wb'))
-            print(f'Training Model Completed! Training Accuracy (CDDRtotal) is : {self.training_accuracy_CDDR}')
+            print(f'[Training Model] training model completed! training Accuracy (CDDRtotal) is : {self.training_accuracy_CDDR}')
             # Module to be finished: cross-validation performance
 
         elif train_or_load_model == 'load':
-            print(f'Loading Model...')
+            print(f'[Applying Trained Model] loading model...')
             self.model = pickle.load(open(f'models/{self.weather}.sav', 'rb'))
-            print('Loading Model Completed!')
+            print('[Applying Trained Model] loading model completed!')
         else:
             raise Exception ("Error! Enter either 'train' or 'load' for train_or_load_model")
 
     def make_predictions(self):
-        print('Make and saving predictions...')
+        print('[Applying Trained Model] make and saving predictions...')
         self.output_test_predicted = self.model.predict(self.inputs_test)
         self.testing_accuracy_CDDR = self.CDDR_tot(self.output_test, self.output_test_predicted)
         self.testing_accuracy_TPR, self.testing_accuracy_FPR = self.TPR_FPR_tot(self.output_test, self.output_test_predicted)
@@ -233,7 +235,7 @@ class FDD_RF_Modeling():
             logdf.to_csv(logpath, mode='a', index=False)
         else:
             logdf.to_csv(logpath, mode='a', index=False, header=False)
-        print(f'Training Model Completed! Testing Accuracy (CDDRtotal) is : {self.testing_accuracy_CDDR}')
+        print(f'[Applying Trained Model] applying model completed! testing Accuracy (CDDRtotal) is : {self.testing_accuracy_CDDR}')
         print('Whole Process Completed!')
 
     def whole_process_only_training(self):

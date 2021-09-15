@@ -11,6 +11,6 @@ for x in randomseedpool:
                                labeling_methodology = 'Simple',
                                feature_selection_methodology = 'Embedded', 
                                aggregate_n_runs = 6 * 24, 
-                               number_of_trees = 400,
+                               number_of_trees = 200,
                                randomseed=x)
     test_run.whole_process_training_and_testing()

@@ -11,6 +11,7 @@ from sklearn.model_selection import train_test_split
 class FDD_RF_Modeling():
     """
     parameters:
+        configs: configuration file including settings for the workflow
         weather: the weather under which the building is simulated. Select from
             'AK_Fairbanks', 'FL_Miami', 'KY_Louisville', 'MN_Duluth',
             'SAU_Riyadh', 'TN_Knoxville', 'VA_Richmond'. The default value is
@@ -27,10 +28,7 @@ class FDD_RF_Modeling():
             means using Random Forest's embedded feature selection to pre-select
              features. 'Filter' means using ANOVA correlation to select high
              correlated features. The default value is 'None'.
-        aggregate_n_runs: Time resolution of FDD models. n = 1 represents 15
-            minutes time resolution, which is the highest time resolution. n = 4
-             represents 60 minutes time resolution. n = 96 represents daily time
-              resolution. The default value is 4.
+        fdd_reporting_frequency_hrs: FDD reporting frequency in hours
         number_of_trees: number of trees in the random forest algorithm
 
     functions:
@@ -47,25 +45,26 @@ class FDD_RF_Modeling():
             training and testing
 
     """
-    def __init__(self, weather = 'TN_Knoxville', labeling_methodology = 'Simple',
-     feature_selection_methodology = 'None', aggregate_n_runs = 4,
+    def __init__(self, configs, weather = 'TN_Knoxville', labeling_methodology = 'Simple',
+     feature_selection_methodology = 'None', fdd_reporting_frequency_hrs = 4,
      number_of_trees = 20, randomseed=2021):
+        self.configs = configs
         self.weather = weather
         self.labeling_methodology = labeling_methodology
         self.feature_selection_methodology = feature_selection_methodology
         self.number_of_trees = number_of_trees
-        self.aggregate_n_runs = aggregate_n_runs
+        self.fdd_reporting_frequency_hrs = fdd_reporting_frequency_hrs
         self.randomseed = randomseed
         self.root_path = os.getcwd()
 
-    def get_timeinterval(os_timestamp):
+    def get_timeinterval(self, os_timestamp):
     
         #converting timestamp to pandas datetime
         timestamp = pd.to_datetime(os_timestamp)
         # inferring timestep (frequency) from the dataframe
-        dt = timestamp.to_series().diff().value_counts().idxmax() # in pandas timedelta
+        dt = timestamp.diff().value_counts().idxmax() # in pandas timedelta
         dt = int(dt.value/(10**9)/60) # in minutes
-        print("timestep of the dataframe = {} min".format(dt))
+        print("[Training/Testing Data Processing] timestep ({} min) inferred from the dataframe".format(dt))
         return dt
     
     def CDDR_tot(self, Real_label, Pred_label):
@@ -119,7 +118,12 @@ class FDD_RF_Modeling():
             for simulation_data_file_name in simulation_data_file_list:
                 print('[Training/Testing Data Processing] reading data (for both training and testing): ' + simulation_data_file_name)
                 temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{simulation_data_file_name}')
-                temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (self.aggregate_n_runs)).mean().iloc[:,0:-8]
+
+                # inferring simulation time step from the data. not sure this is the most efficiency way tho.
+                timestep = self.get_timeinterval(temp_raw_FDD_data.iloc[:,0]) # in minutes
+                aggregate_n_runs = int(60/timestep*self.configs["fdd_reporting_frequency_hrs"])
+
+                temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (aggregate_n_runs)).mean().iloc[:,0:-8]
                 temp_raw_FDD_data['label'] = meta_data.loc[meta_data.sensor_filename == simulation_data_file_name[0:-4]].fault_type.values[0]
                 # Splitting training and testing data
                 temp_raw_FDD_data_train, temp_raw_FDD_data_test = train_test_split(temp_raw_FDD_data, test_size=0.2, random_state=np.random.RandomState(self.randomseed))
@@ -236,7 +240,7 @@ class FDD_RF_Modeling():
                             'labeling methodology': self.labeling_methodology,
                             'feature selection methodology': self.feature_selection_methodology,
                             'number of trees': self.number_of_trees,
-                            'aggregate n runs': self.aggregate_n_runs,
+                            'fdd reporting frequency hrs': self.fdd_reporting_frequency_hrs,
                             'training CDDR': self.training_accuracy_CDDR,
                             'testing CDDR': self.testing_accuracy_CDDR,
                             'testing TPR': self.testing_accuracy_TPR,

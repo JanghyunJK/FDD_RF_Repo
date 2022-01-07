@@ -1,5 +1,5 @@
 {
- "randomruns": 10,
+ "randomruns": 1,
  "weather":"Norfolk",
  "labeling_methodology":"Simple",
  "feature_selection_methodology":"Embedded",

@@ -126,7 +126,7 @@ class FDD_RF_Modeling():
                 temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (aggregate_n_runs)).mean().iloc[:,0:-8]
                 temp_raw_FDD_data['label'] = meta_data.loc[meta_data.sensor_filename == simulation_data_file_name[0:-4]].fault_type.values[0]
                 # Splitting training and testing data
-                temp_raw_FDD_data_train, temp_raw_FDD_data_test = train_test_split(temp_raw_FDD_data, test_size=0.2, random_state=np.random.RandomState(self.randomseed))
+                temp_raw_FDD_data_train, temp_raw_FDD_data_test = train_test_split(temp_raw_FDD_data, test_size=self.configs["split_test_size"], random_state=np.random.RandomState(self.randomseed))
                 fault_inputs_output = pd.concat([fault_inputs_output, temp_raw_FDD_data_train], axis = 0)
                 print('[Training/Testing Data Processing] split and save testing data for ' + simulation_data_file_name)
                 temp_raw_FDD_data_test.to_csv(f'data\\testing_data\\{simulation_data_file_name}')

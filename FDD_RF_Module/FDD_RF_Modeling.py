@@ -58,6 +58,16 @@ class FDD_RF_Modeling():
         self.randomseed = randomseed
         self.root_path = os.getcwd()
 
+    def get_timeinterval(os_timestamp):
+    
+        #converting timestamp to pandas datetime
+        timestamp = pd.to_datetime(os_timestamp)
+        # inferring timestep (frequency) from the dataframe
+        dt = timestamp.to_series().diff().value_counts().idxmax() # in pandas timedelta
+        dt = int(dt.value/(10**9)/60) # in minutes
+        print("timestep of the dataframe = {} min".format(dt))
+        return dt
+    
     def CDDR_tot(self, Real_label, Pred_label):
         CD, CP = 0, 0
         for i,j in zip(Real_label,Pred_label):

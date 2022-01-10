@@ -1,0 +1,10 @@
+{
+ "randomruns": 1,
+ "weather":"Norfolk",
+ "labeling_methodology":"Simple",
+ "feature_selection_methodology":"Embedded",
+ "number_of_trees":200,
+ "simulation_timestep_min":10,
+ "fdd_reporting_frequency_hrs":24,
+ "split_test_size":0.2
+}

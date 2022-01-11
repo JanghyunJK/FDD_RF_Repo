@@ -11,5 +11,5 @@
  "simulation_timestep_min":10,
  "fdd_reporting_frequency_hrs":24,
  "split_test_size":0.2,
- "train_test_stream": "stream"
+ "train_test_apply": "apply"
 }

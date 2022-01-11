@@ -261,7 +261,7 @@ class FDD_RF_Modeling():
         self.testing_accuracy_CDDR = self.CDDR_tot(self.output_test, self.output_test_predicted)
         self.testing_accuracy_TPR, self.testing_accuracy_FPR = self.TPR_FPR_tot(self.output_test, self.output_test_predicted)
         prediction_order = ''.join(self.test_simulation_data_file_list)
-        pd.DataFrame(self.output_test_predicted, columns = ['output_test' + prediction_order]).to_csv(f'results/{self.weather}_{self.configs["train_test_stream"]}.csv', index = None)
+        pd.DataFrame(self.output_test_predicted, columns = ['output_test' + prediction_order]).to_csv(f'results/{self.weather}_{self.configs["train_test_apply"]}.csv', index = None)
         logpath = f'results/log.csv'
         logdf = pd.DataFrame({'randomseed': self.randomseed,
                             'weather': self.weather,

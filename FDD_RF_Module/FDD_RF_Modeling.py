@@ -118,21 +118,18 @@ class FDD_RF_Modeling():
             for simulation_data_file_name in simulation_data_file_list:
                 print('[Training/Testing Data Processing] reading data (for both training and testing): ' + simulation_data_file_name)
                 temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{simulation_data_file_name}')
-
-                # inferring simulation time step from the data. not sure this is the most efficiency way tho.
                 timestep = self.get_timeinterval(temp_raw_FDD_data.iloc[:,0]) # in minutes
                 aggregate_n_runs = int(60/timestep*self.configs["fdd_reporting_frequency_hrs"])
-
                 temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (aggregate_n_runs)).mean().iloc[:,0:-8]
                 temp_raw_FDD_data['label'] = meta_data.loc[meta_data.sensor_filename == simulation_data_file_name[0:-4]].fault_type.values[0]
                 # Splitting training and testing data
                 temp_raw_FDD_data_train, temp_raw_FDD_data_test = train_test_split(temp_raw_FDD_data, test_size=self.configs["split_test_size"], random_state=np.random.RandomState(self.randomseed))
                 fault_inputs_output = pd.concat([fault_inputs_output, temp_raw_FDD_data_train], axis = 0)
                 print('[Training/Testing Data Processing] split and save testing data for ' + simulation_data_file_name)
-                temp_raw_FDD_data_test.to_csv(f'data\\testing_data\\{simulation_data_file_name}')
+                temp_raw_FDD_data_test.to_csv(self.configs['dir_data_test'] + f'\\{simulation_data_file_name}')
 
             ind = pd.DataFrame(temp_raw_FDD_data_test.index.tolist())
-            ind.to_csv(f'data\\testing_data\\{self.weather}_ind.csv')
+            ind.to_csv(self.configs['dir_data_test'] + f'\\{self.weather}_ind.csv')
             fault_inputs_output = fault_inputs_output.reset_index(drop = True)
 
             # Calculating outputs based on labeling methodology
@@ -184,15 +181,45 @@ class FDD_RF_Modeling():
 
         elif train_or_test == 'test':
             # read and aggregate tesing data
-            test_data_file_name_list = [os.path.basename(x) for x in glob.glob('data\\testing_data\\*.csv')]
+            test_data_file_name_list = [os.path.basename(x) for x in glob.glob(self.configs['dir_data_test'] + '*.csv')]
             self.test_simulation_data_file_list = [x for x in test_data_file_name_list if '_ind' not in x]
 
             fault_inputs_output_test = pd.DataFrame([])
 
             for simulation_data_file_name in self.test_simulation_data_file_list:
                 print('[Testing Data Processing] reading testing data ' + simulation_data_file_name)
-                temp_raw_FDD_data_test = pd.read_csv(f'data\\testing_data\\{simulation_data_file_name}')
+                temp_raw_FDD_data_test = pd.read_csv(self.configs['dir_data_test'] + f'\\{simulation_data_file_name}')
                 fault_inputs_output_test = pd.concat([fault_inputs_output_test, temp_raw_FDD_data_test], axis = 0)
+
+            fault_inputs_output_test = fault_inputs_output_test.reset_index(drop = True)
+            self.important_features = pd.read_csv(f'results/important_features_{self.weather}.csv')['important_features'].tolist()
+            print('[Testing Data Processing] filtering data only with important features')
+            self.inputs_test = fault_inputs_output_test[self.important_features]
+
+            if self.labeling_methodology == 'Simple':
+                self.output_test = fault_inputs_output_test.iloc[:,-1]
+
+        elif train_or_test == 'stream':
+            # read and aggregate stream data
+            data_file_name_list = [os.path.basename(x) for x in glob.glob(self.configs['dir_data_stream'] + f"\\*.csv")]
+            self.test_simulation_data_file_list = [x for x in data_file_name_list if '_preformatted' in x]
+
+            fault_inputs_output_test = pd.DataFrame([])
+
+            for stream_data_file_name in self.test_simulation_data_file_list:
+                print('[Training/Testing Data Processing] reading stream data for predicting: ' + stream_data_file_name)
+                temp_stream_FDD_data_test = pd.read_csv(self.configs['dir_data_stream'] + f'\\{stream_data_file_name}')
+                timestep = self.get_timeinterval(temp_stream_FDD_data_test.iloc[:,0]) # in minutes
+                aggregate_n_runs = int(60/timestep*self.configs["fdd_reporting_frequency_hrs"])
+                df_label = temp_stream_FDD_data_test.set_index("OS_time").iloc[:,-1:]
+                df_label.index = pd.to_datetime(df_label.index)
+                resample_frequency = str(self.configs["fdd_reporting_frequency_hrs"]) + "H"
+                df_label = df_label.resample(resample_frequency).bfill()
+                temp_stream_FDD_data_test = temp_stream_FDD_data_test.copy().iloc[:,0:-1]
+                temp_stream_FDD_data_test = temp_stream_FDD_data_test.groupby(temp_stream_FDD_data_test.index // (aggregate_n_runs)).mean().iloc[:,0:-8]
+                temp_stream_FDD_data_test['label'] = df_label.values
+                temp_stream_FDD_data_test.to_csv(self.configs['dir_data_stream'] + f'\\{stream_data_file_name.replace("_preformatted","_formatted")}')
+                fault_inputs_output_test = pd.concat([fault_inputs_output_test, temp_stream_FDD_data_test], axis = 0)
 
             fault_inputs_output_test = fault_inputs_output_test.reset_index(drop = True)
             self.important_features = pd.read_csv(f'results/important_features_{self.weather}.csv')['important_features'].tolist()
@@ -224,6 +251,7 @@ class FDD_RF_Modeling():
             print(f'[Applying Trained Model] loading model...')
             self.model = pickle.load(open(f'models/{self.weather}.sav', 'rb'))
             print('[Applying Trained Model] loading model completed!')
+
         else:
             raise Exception ("Error! Enter either 'train' or 'load' for train_or_load_model")
 
@@ -233,7 +261,7 @@ class FDD_RF_Modeling():
         self.testing_accuracy_CDDR = self.CDDR_tot(self.output_test, self.output_test_predicted)
         self.testing_accuracy_TPR, self.testing_accuracy_FPR = self.TPR_FPR_tot(self.output_test, self.output_test_predicted)
         prediction_order = ''.join(self.test_simulation_data_file_list)
-        pd.DataFrame(self.output_test_predicted, columns = ['output_test' + prediction_order]).to_csv(f'results/{self.weather}.csv', index = None)
+        pd.DataFrame(self.output_test_predicted, columns = ['output_test' + prediction_order]).to_csv(f'results/{self.weather}_{self.configs["train_test_stream"]}.csv', index = None)
         logpath = f'results/log.csv'
         logdf = pd.DataFrame({'randomseed': self.randomseed,
                             'weather': self.weather,
@@ -252,6 +280,9 @@ class FDD_RF_Modeling():
         print(f'[Applying Trained Model] applying model completed! testing Accuracy (CDDRtotal) is : {self.testing_accuracy_CDDR}')
         print('Whole Process Completed!')
 
+    def cost_estimation(self):
+        print('[Estimating Fault Cost] ...')
+
     def whole_process_only_training(self):
         self.create_folder_structure()
         self.inputs_output_generator(train_or_test = 'train')
@@ -268,4 +299,13 @@ class FDD_RF_Modeling():
         self.create_folder_structure()
         self.get_models(train_or_load_model = 'load')
         self.inputs_output_generator(train_or_test = 'test')
+        self.training_accuracy_CDDR = "na"
         self.make_predictions()
+
+    def whole_process_streaming_and_costing(self):
+        self.create_folder_structure()
+        self.get_models(train_or_load_model = 'load')
+        self.inputs_output_generator(train_or_test = 'stream')
+        self.training_accuracy_CDDR = "na"
+        self.make_predictions()
+        #self.cost_estimation()

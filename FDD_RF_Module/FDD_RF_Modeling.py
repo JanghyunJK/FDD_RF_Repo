@@ -199,7 +199,7 @@ class FDD_RF_Modeling():
             if self.labeling_methodology == 'Simple':
                 self.output_test = fault_inputs_output_test.iloc[:,-1]
 
-        elif train_or_test == 'stream':
+        elif train_or_test == 'apply':
             # read and aggregate stream data
             data_file_name_list = [os.path.basename(x) for x in glob.glob(self.configs['dir_data_stream'] + f"\\*.csv")]
             self.test_simulation_data_file_list = [x for x in data_file_name_list if '_preformatted' in x]
@@ -217,7 +217,7 @@ class FDD_RF_Modeling():
                 df_label = df_label.resample(resample_frequency).bfill() # bfill() might not work for all cases
                 temp_stream_FDD_data_test = temp_stream_FDD_data_test.copy().iloc[:,0:-1]
                 temp_stream_FDD_data_test = temp_stream_FDD_data_test.groupby(temp_stream_FDD_data_test.index // (aggregate_n_runs)).mean().iloc[:,0:-8]
-                temp_stream_FDD_data_test['label'] = df_label.values
+                temp_stream_FDD_data_test['label'] = df_label.iloc[:,0].str.strip().values
                 temp_stream_FDD_data_test.to_csv(self.configs['dir_data_stream'] + f'\\{stream_data_file_name.replace("_preformatted","_formatted")}')
                 fault_inputs_output_test = pd.concat([fault_inputs_output_test, temp_stream_FDD_data_test], axis = 0)
 
@@ -302,10 +302,10 @@ class FDD_RF_Modeling():
         self.training_accuracy_CDDR = "na"
         self.make_predictions()
 
-    def whole_process_streaming_and_costing(self):
+    def whole_process_applying_and_costing(self):
         self.create_folder_structure()
         self.get_models(train_or_load_model = 'load')
-        self.inputs_output_generator(train_or_test = 'stream')
+        self.inputs_output_generator(train_or_test = 'apply')
         self.training_accuracy_CDDR = "na"
         self.make_predictions()
         #self.cost_estimation()

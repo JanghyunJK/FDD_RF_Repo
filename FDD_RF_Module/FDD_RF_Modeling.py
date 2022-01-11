@@ -214,7 +214,7 @@ class FDD_RF_Modeling():
                 df_label = temp_stream_FDD_data_test.set_index("OS_time").iloc[:,-1:]
                 df_label.index = pd.to_datetime(df_label.index)
                 resample_frequency = str(self.configs["fdd_reporting_frequency_hrs"]) + "H"
-                df_label = df_label.resample(resample_frequency).bfill()
+                df_label = df_label.resample(resample_frequency).bfill() # bfill() might not work for all cases
                 temp_stream_FDD_data_test = temp_stream_FDD_data_test.copy().iloc[:,0:-1]
                 temp_stream_FDD_data_test = temp_stream_FDD_data_test.groupby(temp_stream_FDD_data_test.index // (aggregate_n_runs)).mean().iloc[:,0:-8]
                 temp_stream_FDD_data_test['label'] = df_label.values

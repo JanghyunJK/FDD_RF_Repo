@@ -27,4 +27,4 @@ test_run = FDD_RF_Modeling(configs,
                             number_of_trees = configs['number_of_trees'],
                             randomseed=1)
 
-test_run.whole_process_streaming_and_costing()
+test_run.whole_process_applying_and_costing()

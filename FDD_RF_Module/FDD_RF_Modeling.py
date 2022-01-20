@@ -283,6 +283,17 @@ class FDD_RF_Modeling():
     def cost_estimation(self):
         print('[Estimating Fault Cost] ...')
 
+        # read output file that includes FDD results for every reporting time step
+        # convert the FDD results output into simulation time step
+        # read baseline simulation file
+        # read faulted simulation file(s)
+        # calculate electricity usage difference
+        # calculate natural gas usage difference
+        # calculate thermal comfort difference
+        # convert electricity/gas to $
+        # convert thermal comfort to $
+        # report and visulize results
+
     def whole_process_only_training(self):
         self.create_folder_structure()
         self.inputs_output_generator(train_or_test = 'train')

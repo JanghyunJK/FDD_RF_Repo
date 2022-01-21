@@ -181,7 +181,7 @@ class FDD_RF_Modeling():
 
         elif train_or_test == 'test':
             # read and aggregate tesing data
-            test_data_file_name_list = [os.path.basename(x) for x in glob.glob(self.configs['dir_data_test'] + '*.csv')]
+            test_data_file_name_list = [os.path.basename(x) for x in glob.glob(self.configs['dir_data_test'] + '/*.csv')]
             self.test_simulation_data_file_list = [x for x in test_data_file_name_list if '_ind' not in x]
 
             fault_inputs_output_test = pd.DataFrame([])
@@ -281,10 +281,9 @@ class FDD_RF_Modeling():
         print('Whole Process Completed!')
 
     def cost_estimation(self):
-        print('[Estimating Fault Cost] ...')
 
         # read output file that includes FDD results for every reporting time step
-        # convert the FDD results output into simulation time step
+        # convert the FDD results output into simulation timestep
         # read baseline simulation file
         # read faulted simulation file(s)
         # calculate electricity usage difference
@@ -293,6 +292,96 @@ class FDD_RF_Modeling():
         # convert electricity/gas to $
         # convert thermal comfort to $
         # report and visulize results
+
+        # reading FDD results file
+        df_result = pd.read_csv(self.configs["dir_result"] + "/{}_{}.csv".format( self.configs["weather"], self.configs["train_test_apply"] ))
+
+        # creating empty dataframe with timestamp
+        freq = str(self.configs['cost_est_timestep_min']) + 'min'
+        df_combined = pd.DataFrame([])
+        df_combined['reading_time'] = pd.date_range( self.configs['simulation_date_start'], self.configs['simulation_date_end'], freq=freq)
+        df_combined = df_combined.set_index(['reading_time'])[:-1]
+
+        # expanding FDD results into the same user-specified timestep
+        df_result_exp = np.repeat(list(df_result.values), self.configs['fdd_reporting_frequency_hrs']*int(60/self.configs['cost_est_timestep_min']))
+        df_result_exp = pd.DataFrame(df_result_exp)
+        df_result_exp.columns = ['FaultType']
+        df_result_exp.index = df_combined.index
+
+        # setting timestamp for raw simulation data
+        freq_raw = str(self.configs['simulation_timestep_min']) + 'min'
+        df_index = pd.DataFrame([])
+        df_index['reading_time'] = pd.date_range( self.configs['simulation_date_start'], self.configs['simulation_date_end'], freq=freq_raw)
+        df_index = df_index.set_index(['reading_time'])[:-1]
+        timestamp_last = df_index.index[-1]
+
+        # reading baseline simulation results
+        print("[Estimating Fault Cost] reading baseline simulation results")
+        df_baseline = pd.read_csv(self.configs['dir_data']+"/"+self.configs['weather']+"/baseline.csv", usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
+        df_baseline.columns = [f"baseline_elec_{self.configs['sensor_unit_elec']}",f"baseline_ng_{self.configs['sensor_unit_ng']}"]
+        df_baseline.index = df_index.index
+        df_baseline = df_baseline.resample(str(self.configs['cost_est_timestep_min'])+"T").mean()
+
+        # recreating FDD results with unique fault type (consecutive fault types are removed)
+        df_unique = df_result_exp[(df_result_exp.ne(df_result_exp.shift())).any(axis=1)]
+        df_unique = df_unique.reset_index()
+
+        # reading individual fault simulation results (based on FDD results) and creating whole year combined results
+        count = 1
+        print("[Estimating Fault Cost] combining simulation results from the FDD results")
+
+        df_combined_temp = pd.DataFrame()
+        for index, row in df_unique.iterrows():
+            
+            df_fault = pd.DataFrame()
+            
+            # specifying start and stop timestamp for each detected fault
+            rownum_current = df_unique.loc[df_unique.index==index,:].index[0]
+            timestamp_start = df_unique.iloc[rownum_current,:].reading_time
+            if rownum_current+1 < df_unique.shape[0]:
+                timestamp_end = df_unique.iloc[rownum_current+1,:].reading_time - pd.Timedelta(minutes=self.configs["simulation_timestep_min"])
+            else:
+                timestamp_end = timestamp_last
+                
+            print(f"[Estimating Fault Cost] prossessing [{row['FaultType']} ({count}/{df_unique.shape[0]})] from the FDD results covering {timestamp_start} to {timestamp_end}")
+                
+            count_file = 0
+            for file in glob.glob(self.configs['dir_data']+"/"+self.configs['weather']+f"/*{row['FaultType']}*"):
+                print(f"[Estimating Fault Cost] reading [{file}] file")
+                count_file += 1
+                if count_file == 1:
+                    df_temp = pd.read_csv(file, usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
+                    df_temp.index = df_index.index
+                    df_temp = df_temp.resample(str(self.configs['cost_est_timestep_min'])+"T").mean()
+                    df_fault = df_temp.copy()
+                else:
+                    df_temp = pd.read_csv(file, usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
+                    df_temp.index = df_index.index
+                    df_temp = df_temp.resample(str(self.configs['cost_est_timestep_min'])+"T").mean()
+                    df_fault += df_temp
+                    
+            # averaging all fault intensity simulations for a single fault and merging into combined dataframe
+            print(f"[Estimating Fault Cost] averaging all fault intensity simulations for a single fault and merging into combined dataframe")
+            df_fault = df_fault/count_file
+            df_fault = df_fault[timestamp_start:timestamp_end]
+            df_combined_temp = pd.concat([df_combined_temp, df_fault])
+            count+=1
+
+        # creating columns for time, date, and month
+        df_combined['Time'] = pd.to_datetime(df_combined.index).time
+        df_combined['Date'] = pd.to_datetime(df_combined.index).date
+        df_combined['Month'] = pd.to_datetime(df_combined.index).month
+
+        # calculate monthly and annual excess energy usages
+        if (self.configs['sensor_unit_ng']=='W') & (self.configs['sensor_unit_elec']=='W'):
+            df_monthly = df_combined.groupby(['Month'])[['diff_elec','diff_ng']].sum()/1000 # convert W to kW
+            df_monthly = df_combined.groupby(['Month'])[['diff_elec','diff_ng']].sum()/(60/self.configs['cost_est_timestep_min']) #convert kW to kWh
+            diff_annual_elec = round(df_monthly.sum()['diff_elec']) # in kWh
+            diff_annual_ng = round(df_monthly.sum()['diff_ng']) # in kWh
+        else:
+            # add other unit conversions
+            print("[Estimating Fault Cost] unit conversion from {} for electricity and {} for natural gas to kWh is not currently supported".format(self.configs['sensor_unit_elec'],configs['sensor_unit_ng']))
+            
 
     def whole_process_only_training(self):
         self.create_folder_structure()

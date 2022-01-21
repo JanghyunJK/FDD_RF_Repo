@@ -181,7 +181,7 @@ class FDD_RF_Modeling():
 
         elif train_or_test == 'test':
             # read and aggregate tesing data
-            test_data_file_name_list = [os.path.basename(x) for x in glob.glob(self.configs['dir_data_test'] + '*.csv')]
+            test_data_file_name_list = [os.path.basename(x) for x in glob.glob(self.configs['dir_data_test'] + '/*.csv')]
             self.test_simulation_data_file_list = [x for x in test_data_file_name_list if '_ind' not in x]
 
             fault_inputs_output_test = pd.DataFrame([])

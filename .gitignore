@@ -1,6 +1,6 @@
 # training data
 run/data/**/*.csv
 run/models/*.sav
-run/results/*.csv
+run/results/*Norfolk*.csv
 JupyterNotebook/*.csv
 JupyterNotebook/figures

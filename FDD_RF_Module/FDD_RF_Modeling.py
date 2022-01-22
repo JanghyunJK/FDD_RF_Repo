@@ -367,6 +367,16 @@ class FDD_RF_Modeling():
             df_combined_temp = pd.concat([df_combined_temp, df_fault])
             count+=1
 
+        # creating combined dataframe from baseline and faulted timeseries data
+        df_combined_temp.columns = [f"faulted_elec_{self.configs['sensor_unit_elec']}",f"faulted_ng_{self.configs['sensor_unit_ng']}"]
+        df_combined_temp.index = pd.to_datetime(df_combined_temp.index)
+        df_combined = pd.merge(df_combined, df_baseline, how='outer', left_index=True, right_index=True)
+        df_combined = pd.merge(df_combined, df_combined_temp, how='outer', left_index=True, right_index=True)
+
+        # creating columns of energy usage differences
+        df_combined['diff_elec'] = df_combined["faulted_elec_{}".format(self.configs["sensor_unit_elec"])] - df_combined["baseline_elec_{}".format(self.configs["sensor_unit_elec"])]
+        df_combined['diff_ng'] = df_combined["faulted_ng_{}".format(self.configs["sensor_unit_ng"])] - df_combined["baseline_ng_{}".format(self.configs["sensor_unit_ng"])]
+
         # creating columns for time, date, and month
         df_combined['Time'] = pd.to_datetime(df_combined.index).time
         df_combined['Date'] = pd.to_datetime(df_combined.index).date

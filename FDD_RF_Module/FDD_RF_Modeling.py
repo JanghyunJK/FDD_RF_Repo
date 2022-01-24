@@ -294,7 +294,7 @@ class FDD_RF_Modeling():
         # report and visulize results
 
         # reading FDD results file
-        df_result = pd.read_csv(self.configs["dir_result"] + "/{}_{}.csv".format( self.configs["weather"], self.configs["train_test_apply"] ))
+        df_result = pd.read_csv(self.configs["dir_results"] + "/{}_{}.csv".format( self.configs["weather"], self.configs["train_test_apply"] ))
 
         # creating empty dataframe with timestamp
         freq = str(self.configs['cost_est_timestep_min']) + 'min'
@@ -392,6 +392,9 @@ class FDD_RF_Modeling():
             # add other unit conversions
             print("[Estimating Fault Cost] unit conversion from {} for electricity and {} for natural gas to kWh is not currently supported".format(self.configs['sensor_unit_elec'],configs['sensor_unit_ng']))
             
+        df_combined.to_csv(self.configs['dir_results'] + "/{}_FDD_results.csv".format(self.configs["weather"]))
+        self.configs["excess_elec_kWh"] = diff_annual_elec
+        self.configs["excess_ng_kWh"] = diff_annual_ng
 
     def whole_process_only_training(self):
         self.create_folder_structure()
@@ -418,4 +421,4 @@ class FDD_RF_Modeling():
         self.inputs_output_generator(train_or_test = 'apply')
         self.training_accuracy_CDDR = "na"
         self.make_predictions()
-        #self.cost_estimation()
+        self.cost_estimation()

@@ -320,7 +320,7 @@ class FDD_RF_Modeling():
     #----------------------------------------------------------------------------------------------#
     ################################################################################################
 
-    def cost_estimation(self):
+    def impact_estimation(self):
 
         # have to install plotly & kaleido
         # pip install plotly
@@ -376,9 +376,7 @@ class FDD_RF_Modeling():
 
         df_combined_temp = pd.DataFrame()
         for index, row in df_unique.iterrows():
-            
-            df_fault = pd.DataFrame()
-            
+                        
             # specifying start and stop timestamp for each detected fault
             rownum_current = df_unique.loc[df_unique.index==index,:].index[0]
             timestamp_start = df_unique.iloc[rownum_current,:].reading_time
@@ -397,17 +395,18 @@ class FDD_RF_Modeling():
                     df_temp = pd.read_csv(file, usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
                     df_temp.index = df_index.index
                     df_temp = df_temp.resample(str(self.configs['cost_est_timestep_min'])+"T").mean()
+                    df_temp = df_temp[timestamp_start:timestamp_end]
                     df_fault = df_temp.copy()
                 else:
                     df_temp = pd.read_csv(file, usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
                     df_temp.index = df_index.index
                     df_temp = df_temp.resample(str(self.configs['cost_est_timestep_min'])+"T").mean()
+                    df_temp = df_temp[timestamp_start:timestamp_end]
                     df_fault += df_temp
                     
             # averaging all fault intensity simulations for a single fault and merging into combined dataframe
             print(f"[Estimating Fault Impact] averaging all fault intensity simulations for a single fault and merging into combined dataframe")
             df_fault = df_fault/count_file
-            df_fault = df_fault[timestamp_start:timestamp_end]
             df_combined_temp = pd.concat([df_combined_temp, df_fault])
             count+=1
 
@@ -423,22 +422,22 @@ class FDD_RF_Modeling():
 
         # creating columns for time, date, and month
         df_combined['Time'] = pd.to_datetime(df_combined.index).time
+        df_combined['Time'] = df_combined.Time.astype(str).str.rsplit(":",1, expand=True).iloc[:,0]
         df_combined['Date'] = pd.to_datetime(df_combined.index).date
         df_combined['Month'] = pd.to_datetime(df_combined.index).month
 
         # calculate monthly and annual excess energy usages
         if (self.configs['sensor_unit_ng']=='W') & (self.configs['sensor_unit_elec']=='W'):
-            df_monthly = df_combined.groupby(['Month'])[['diff_elec','diff_ng']].sum()/1000 # convert W to kW
-            df_monthly = df_combined.groupby(['Month'])[['diff_elec','diff_ng']].sum()/(60/self.configs['cost_est_timestep_min']) #convert kW to kWh
-            base_annual_elec = round(df_combined["baseline_elec_{}".format(self.configs["sensor_unit_elec"])].sum()) # in kWh
-            base_annual_ng = round(df_combined["baseline_ng_{}".format(self.configs["sensor_unit_ng"])].sum()) # in kWh
+            df_monthly = df_combined.groupby(['Month'])[["baseline_elec_{}".format(self.configs["sensor_unit_elec"]),"baseline_ng_{}".format(self.configs["sensor_unit_ng"]),'diff_elec','diff_ng']].sum()/1000/(60/self.configs['cost_est_timestep_min']) #convert W to kWh
+            base_annual_elec = round(df_monthly["baseline_elec_{}".format(self.configs["sensor_unit_elec"])].sum()) # in kWh
+            base_annual_ng = round(df_monthly["baseline_ng_{}".format(self.configs["sensor_unit_ng"])].sum()) # in kWh
             diff_annual_elec = round(df_monthly.sum()['diff_elec']) # in kWh
             diff_annual_ng = round(df_monthly.sum()['diff_ng']) # in kWh
             perc_annual_elec = round(diff_annual_elec/base_annual_elec*100, 3) # in %
             perc_annual_ng = round(diff_annual_ng/base_annual_ng*100, 3) # in %
         else:
             # add other unit conversions
-            print("[Estimating Fault Impact] unit conversion from {} for electricity and {} for natural gas to kWh is not currently supported".format(self.configs['sensor_unit_elec'],configs['sensor_unit_ng']))
+            print("[Estimating Fault Impact] unit conversion from {} for electricity and {} for natural gas to kWh is not currently supported".format(self.configs['sensor_unit_elec'],self.configs['sensor_unit_ng']))
             
         path_impact = self.configs['dir_results'] + "/{}_FDD_impact_table.csv".format(self.configs["weather"])
         print("[Estimating Fault Impact] saving fault impact estimation summary in {}".format(path_impact))
@@ -449,13 +448,10 @@ class FDD_RF_Modeling():
         self.configs["excess_ng_%"] = perc_annual_ng 
 
         # plot setting
-        linewidth = 0
-        linecolor = 'rgb(255,255,255)'
-        mirror = True
         title_font_size = 12
         colorbar_font_size = 12
         tick_font_size = 12
-        anot_font_size = 18
+        anot_font_size = 14
         fontfamily = 'verdana'
         barwidth = 0.75
         colorscale=[
@@ -490,9 +486,11 @@ class FDD_RF_Modeling():
 
 
         # plotting
+        num_rows = 2
+        num_cols = 3
         fig = make_subplots(
-            rows=2, 
-            cols=3, 
+            rows=num_rows, 
+            cols=num_cols, 
             shared_xaxes=True, 
             vertical_spacing=0.025,
             horizontal_spacing=0.1,
@@ -540,32 +538,73 @@ class FDD_RF_Modeling():
         row=2, col=2)
 
         # annotation
+        if perc_annual_elec > 0:
+            text_elec = "+"
+        else:
+            text_elec = ""
+
+        if perc_annual_ng > 0:
+            text_ng = "+"
+        else:
+            text_ng = ""
         fig.add_annotation(
-            x=0.05,
+            x=0.08,
             y=0.75,
             xref="paper",
             yref="paper",
             xanchor='center',
             yanchor='middle',
-            text="Excess<br>electricity<br><b>{}<br>kWh/year</b>".format(diff_annual_elec),
+            text="Excess<br>electricity<br><b>{} kWh/year<br>({}{}%)</b>".format(diff_annual_elec, text_elec, perc_annual_elec),
             font=dict(
                 family=fontfamily,
                 size=anot_font_size,
                 ),
             showarrow=False,
-            align="center",
+            align="right",
             )
         fig.add_annotation(
-            x=0.05,
+            x=0.08,
             y=0.25,
             xref="paper",
             yref="paper",
             xanchor='center',
             yanchor='middle',
-            text="Excess<br>natural gas<br><b>{}<br>kWh/year</b>".format(diff_annual_ng),
+            text="Excess<br>natural gas<br><b>{} kWh/year<br>({}{}%)</b>".format(diff_annual_ng, text_ng, perc_annual_ng),
             font=dict(
                 family=fontfamily,
                 size=anot_font_size,
+                ),
+            showarrow=False,
+            align="right",
+            )
+        fig.add_annotation(
+            x=0.2,
+            y=0.75,
+            xref="paper",
+            yref="paper",
+            xanchor='center',
+            yanchor='middle',
+            text="<b>Electricity [kWh]</b>",
+            textangle=270,
+            font=dict(
+                family=fontfamily,
+                size=title_font_size,
+                ),
+            showarrow=False,
+            align="center",
+            )
+        fig.add_annotation(
+            x=0.2,
+            y=0.25,
+            xref="paper",
+            yref="paper",
+            xanchor='center',
+            yanchor='middle',
+            text="<b>Natural gas [kWh]</b>",
+            textangle=270,
+            font=dict(
+                family=fontfamily,
+                size=title_font_size,
                 ),
             showarrow=False,
             align="center",
@@ -629,14 +668,38 @@ class FDD_RF_Modeling():
         )
 
         # axes
-        fig.update_yaxes(
-            showticklabels=False,
-            row=2, col=1
-        )
-        fig.update_yaxes(
-            showticklabels=False,
-            row=1, col=1
-        )
+        for row in range(1, num_rows+1):
+            for col in range(1, num_cols+1):
+                if col==1:
+                    fig.update_yaxes(
+                        showticklabels=False,
+                        row=row, col=col
+                    )      
+                elif col==2:     
+                    fig.update_yaxes(
+                        tickfont = dict(
+                            family=fontfamily,
+                            size=tick_font_size,
+                        ),
+                        row=row, col=col
+                    )
+                elif col==3:
+                    fig.update_yaxes(
+                        title = dict( 
+                            text="<b>Time</b>",
+                            font=dict(
+                                family=fontfamily,
+                                size=title_font_size,
+                            ),
+                            standoff=0,
+                        ),
+                        tickfont = dict(
+                            family=fontfamily,
+                            size=tick_font_size,
+                        ),
+                        row=row, col=col
+                    )      
+
         fig.update_xaxes(
             title = dict( 
                 text="<b>Date</b>",
@@ -649,16 +712,9 @@ class FDD_RF_Modeling():
                 family=fontfamily,
                 size=tick_font_size,
             ),
-            linecolor=linecolor,
-            linewidth=linewidth,
-            mirror=mirror,
+            tickformat="%b",
+            dtick="M2",
             row=2, col=3
-        )
-        fig.update_xaxes(
-            linecolor=linecolor,
-            linewidth=linewidth,
-            mirror=mirror,
-            row=1, col=3
         )
         fig.update_xaxes(
             title = dict( 
@@ -672,90 +728,11 @@ class FDD_RF_Modeling():
                 family=fontfamily,
                 size=tick_font_size,
             ),
-            dtick=1,
-            linecolor=linecolor,
-            linewidth=linewidth,
-            mirror=mirror,
             row=2, col=2
         )
         fig.update_xaxes(
             dtick=1,
-            linecolor=linecolor,
-            linewidth=linewidth,
-            mirror=mirror,
             row=1, col=2
-        )
-        fig.update_yaxes(
-            title = dict( 
-                text="<b>Time</b>",
-                font=dict(
-                    family=fontfamily,
-                    size=title_font_size,
-                ),
-                standoff=0,
-            ),
-            tickfont = dict(
-                family=fontfamily,
-                size=tick_font_size,
-            ),
-            linecolor=linecolor,
-            linewidth=linewidth,
-            mirror=mirror,
-            row=2, col=3
-        )
-        fig.update_yaxes(
-            title = dict( 
-                text="<b>Time</b>",
-                font=dict(
-                    family=fontfamily,
-                    size=title_font_size,
-                ),
-                standoff=0,
-            ),
-            tickfont = dict(
-                family=fontfamily,
-                size=tick_font_size,
-            ),
-            linecolor=linecolor,
-            linewidth=linewidth,
-            mirror=mirror,
-            row=1, col=3
-        )
-        fig.update_yaxes(
-            title = dict( 
-                text="<b>Electricity [kWh]</b>",
-                font=dict(
-                    family=fontfamily,
-                    size=title_font_size,
-                ),
-                standoff=0,
-            ),
-            tickfont = dict(
-                family=fontfamily,
-                size=tick_font_size,
-            ),
-            linecolor=linecolor,
-            linewidth=linewidth,
-            mirror=mirror,
-            row=1, col=2
-        )
-        fig.update_yaxes(
-            title = dict( 
-                text="<b>Natural gas [kWh]</b>",
-                font=dict(
-                    family=fontfamily,
-                    size=title_font_size,
-                ),
-                standoff=0,
-            ),
-            tickfont = dict(
-                family=fontfamily,
-                size=tick_font_size,
-            ),
-            linecolor=linecolor,
-            linewidth=linewidth,
-            mirror=mirror,
-            row=2, col=2
         )
 
         # export
@@ -792,4 +769,4 @@ class FDD_RF_Modeling():
         self.inputs_output_generator(train_or_test = 'apply')
         self.training_accuracy_CDDR = "na"
         self.make_predictions()
-        self.cost_estimation()
+        self.impact_estimation()

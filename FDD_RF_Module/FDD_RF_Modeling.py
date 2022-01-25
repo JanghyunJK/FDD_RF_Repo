@@ -7,6 +7,9 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import mean_squared_error
 from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.model_selection import train_test_split
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.io as pio
 
 class FDD_RF_Modeling():
     """
@@ -45,6 +48,11 @@ class FDD_RF_Modeling():
             training and testing
 
     """
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
     def __init__(self, configs, weather = 'TN_Knoxville', labeling_methodology = 'Simple',
      feature_selection_methodology = 'None', fdd_reporting_frequency_hrs = 4,
      number_of_trees = 20, randomseed=2021):
@@ -57,6 +65,10 @@ class FDD_RF_Modeling():
         self.randomseed = randomseed
         self.root_path = os.getcwd()
 
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
     def get_timeinterval(self, os_timestamp):
     
         #converting timestamp to pandas datetime
@@ -66,6 +78,10 @@ class FDD_RF_Modeling():
         dt = int(dt.value/(10**9)/60) # in minutes
         print("[Training/Testing Data Processing] timestep ({} min) inferred from the dataframe".format(dt))
         return dt
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
     
     def CDDR_tot(self, Real_label, Pred_label):
         CD, CP = 0, 0
@@ -80,6 +96,10 @@ class FDD_RF_Modeling():
             CDDR_tot = CD / CP
         return CDDR_tot
 
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
     def TPR_FPR_tot(self, Real_label, Pred_label):
         TP, FP, TCP = 0, 0, 0
         for i,j in zip(Real_label,Pred_label):
@@ -93,12 +113,20 @@ class FDD_RF_Modeling():
         FPR = FP / TCP
         return TPR, FPR
 
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
     def create_folder_structure(self):
         print('[Preprocessing] creating folder structure...')
         folders = ['models/', 'results/', 'data/']
         for folder in folders:
             if not os.path.exists(os.path.join(self.root_path, folder)):
                 os.makedirs(os.path.join(self.root_path, folder))
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
 
     def inputs_output_generator(self, train_or_test):
         print(f'[Training/Testing Data Processing] generating inputs for {train_or_test}ing...')
@@ -232,6 +260,10 @@ class FDD_RF_Modeling():
         else:
             raise Exception("Error! Enter either 'train' or 'test' for train_or_test")
 
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
     def get_models(self, train_or_load_model):
 
         if train_or_load_model == 'train':
@@ -254,6 +286,10 @@ class FDD_RF_Modeling():
 
         else:
             raise Exception ("Error! Enter either 'train' or 'load' for train_or_load_model")
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
 
     def make_predictions(self):
         print('[Applying Trained Model] make and saving predictions...')
@@ -279,6 +315,10 @@ class FDD_RF_Modeling():
             logdf.to_csv(logpath, mode='a', index=False, header=False)
         print(f'[Applying Trained Model] applying model completed! testing Accuracy (CDDRtotal) is : {self.testing_accuracy_CDDR}')
         print('Whole Process Completed!')
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
 
     def cost_estimation(self):
 
@@ -395,6 +435,323 @@ class FDD_RF_Modeling():
         df_combined.to_csv(self.configs['dir_results'] + "/{}_FDD_results.csv".format(self.configs["weather"]))
         self.configs["excess_elec_kWh"] = diff_annual_elec
         self.configs["excess_ng_kWh"] = diff_annual_ng
+
+        # plot setting
+        linewidth = 0
+        linecolor = 'rgb(255,255,255)'
+        mirror = True
+        title_font_size = 12
+        colorbar_font_size = 12
+        tick_font_size = 12
+        anot_font_size = 20
+        fontfamily = 'verdana'
+        barwidth = 0.75
+        colorscale=[
+            [0.0, 'rgb(5,48,97)'],
+            [0.1, 'rgb(33,102,172)'],
+            [0.2, 'rgb(67,147,195)'],
+            [0.3, 'rgb(146,197,222)'],
+            [0.4, 'rgb(209,229,240)'],
+            [0.5, 'rgb(247,247,247)'],
+            [0.6, 'rgb(253,219,199)'],
+            [0.7, 'rgb(244,165,130)'],
+            [0.8, 'rgb(214,96,77)'],
+            [0.9, 'rgb(178,24,43)'],
+            [1.0, 'rgb(103,0,31)']
+        ]
+        # colorscale=[
+        #     [0.0, 'rgb(49,54,149)'],
+        #     [0.1, 'rgb(69,117,180)'],
+        #     [0.2, 'rgb(116,173,209)'],
+        #     [0.3, 'rgb(171,217,233)'],
+        #     [0.4, 'rgb(224,243,248)'],
+        #     [0.5, 'rgb(255,242,204)'],
+        #     [0.6, 'rgb(254,224,144)'],
+        #     [0.7, 'rgb(253,174,97)'],
+        #     [0.8, 'rgb(244,109,67)'],
+        #     [0.9, 'rgb(215,48,39)'],
+        #     [1.0, 'rgb(165,0,38)']
+        # ]
+        color_bar = 'rgb(116,173,209)'
+        range_max_elec = max( df_combined['diff_elec'].max() , abs(df_combined['diff_elec'].min()) )
+        range_max_ng = max( df_combined['diff_ng'].max() , abs(df_combined['diff_ng'].min()) )
+
+
+        # plotting
+        fig = make_subplots(
+            rows=2, 
+            cols=3, 
+            shared_xaxes=True, 
+            vertical_spacing=0.025,
+            horizontal_spacing=0.1,
+            column_widths=[0.2, 0.4, 0.4],
+        )  
+
+        # heatmap
+        fig.add_trace(go.Heatmap(
+            z=df_combined['diff_elec'],
+            x=df_combined['Date'],
+            y=df_combined['Time'],
+            colorscale='tempo',
+            coloraxis='coloraxis1',
+        ),
+        row=1, col=3)
+        fig.add_trace(go.Heatmap(
+            z=df_combined['diff_ng'],
+            x=df_combined['Date'],
+            y=df_combined['Time'],
+            colorscale='tempo',
+            coloraxis='coloraxis2',
+        ),
+        row=2, col=3)
+
+        # bar chart
+        fig.add_trace(go.Bar(
+            x=df_monthly.index,
+            y=df_monthly['diff_elec'],
+            showlegend=False,
+            width=barwidth,
+            marker=dict(
+                color=color_bar,
+            )
+        ),
+        row=1, col=2)
+        fig.add_trace(go.Bar(
+            x=df_monthly.index,
+            y=df_monthly['diff_ng'],
+            showlegend=False,
+            width=barwidth,
+            marker=dict(
+                color=color_bar,
+            )
+        ),
+        row=2, col=2)
+
+        # annotation
+        fig.add_annotation(
+            x=0.05,
+            y=0.75,
+            xref="paper",
+            yref="paper",
+            xanchor='center',
+            yanchor='middle',
+            text="Excess<br>electricity<br><b>{}<br>kWh/year</b>".format(diff_annual_elec),
+            font=dict(
+                family=fontfamily,
+                size=anot_font_size,
+                ),
+            showarrow=False,
+            align="center",
+            )
+        fig.add_annotation(
+            x=0.05,
+            y=0.25,
+            xref="paper",
+            yref="paper",
+            xanchor='center',
+            yanchor='middle',
+            text="Excess<br>natural gas<br><b>{}<br>kWh/year</b>".format(diff_annual_ng),
+            font=dict(
+                family=fontfamily,
+                size=anot_font_size,
+                ),
+            showarrow=False,
+            align="center",
+            )
+
+        # layout
+        fig.update_layout(
+            width=900,
+            height=400,
+            margin=dict(
+                l=0,
+                r=0,
+                t=0,
+                b=0,
+            ),
+            plot_bgcolor='white',
+            coloraxis1=dict(
+                cmin=-range_max_elec,
+                cmid=0,
+                cmax=range_max_elec,
+                colorscale=colorscale, 
+                colorbar = dict(
+                    title=dict(
+                        text = "Excess electricty [{}]".format(configs['sensor_unit_elec']),
+                        side='right',
+                        font=dict(
+                            size=colorbar_font_size,
+                            family=fontfamily,
+                        ),
+                    ),
+                    len=0.5,
+                    x=1,
+                    xanchor='left',
+                    y=0.75,
+                    yanchor='middle',
+                    thickness=23,
+                )
+            ),
+            coloraxis2=dict(
+                cmin=-range_max_ng,
+                cmid=0,
+                cmax=range_max_ng,
+                colorscale=colorscale, 
+                colorbar = dict(
+                    title=dict(
+                        text = "Excess natural gas [{}]".format(configs['sensor_unit_ng']),
+                        side='right',
+                        font=dict(
+                            size=colorbar_font_size,
+                            family=fontfamily,
+                        ),
+                    ),
+                    len=0.5,
+                    x=1,
+                    xanchor='left',
+                    y=0.25,
+                    yanchor='middle',
+                    thickness=23,
+                ),
+            ),
+        )
+
+        # axes
+        fig.update_yaxes(
+            showticklabels=False,
+            row=2, col=1
+        )
+        fig.update_yaxes(
+            showticklabels=False,
+            row=1, col=1
+        )
+        fig.update_xaxes(
+            title = dict( 
+                text="<b>Date</b>",
+                font=dict(
+                    family=fontfamily,
+                    size=title_font_size,
+                ),
+            ),
+            tickfont = dict(
+                family=fontfamily,
+                size=tick_font_size,
+            ),
+            linecolor=linecolor,
+            linewidth=linewidth,
+            mirror=mirror,
+            row=2, col=3
+        )
+        fig.update_xaxes(
+            linecolor=linecolor,
+            linewidth=linewidth,
+            mirror=mirror,
+            row=1, col=3
+        )
+        fig.update_xaxes(
+            title = dict( 
+                text="<b>Month</b>",
+                font=dict(
+                    family=fontfamily,
+                    size=title_font_size,
+                ),
+            ),
+            tickfont = dict(
+                family=fontfamily,
+                size=tick_font_size,
+            ),
+            dtick=1,
+            linecolor=linecolor,
+            linewidth=linewidth,
+            mirror=mirror,
+            row=2, col=2
+        )
+        fig.update_xaxes(
+            dtick=1,
+            linecolor=linecolor,
+            linewidth=linewidth,
+            mirror=mirror,
+            row=1, col=2
+        )
+        fig.update_yaxes(
+            title = dict( 
+                text="<b>Time</b>",
+                font=dict(
+                    family=fontfamily,
+                    size=title_font_size,
+                ),
+                standoff=0,
+            ),
+            tickfont = dict(
+                family=fontfamily,
+                size=tick_font_size,
+            ),
+            linecolor=linecolor,
+            linewidth=linewidth,
+            mirror=mirror,
+            row=2, col=3
+        )
+        fig.update_yaxes(
+            title = dict( 
+                text="<b>Time</b>",
+                font=dict(
+                    family=fontfamily,
+                    size=title_font_size,
+                ),
+                standoff=0,
+            ),
+            tickfont = dict(
+                family=fontfamily,
+                size=tick_font_size,
+            ),
+            linecolor=linecolor,
+            linewidth=linewidth,
+            mirror=mirror,
+            row=1, col=3
+        )
+        fig.update_yaxes(
+            title = dict( 
+                text="<b>Electricity [kWh]</b>",
+                font=dict(
+                    family=fontfamily,
+                    size=title_font_size,
+                ),
+                standoff=0,
+            ),
+            tickfont = dict(
+                family=fontfamily,
+                size=tick_font_size,
+            ),
+            linecolor=linecolor,
+            linewidth=linewidth,
+            mirror=mirror,
+            row=1, col=2
+        )
+        fig.update_yaxes(
+            title = dict( 
+                text="<b>Natural gas [kWh]</b>",
+                font=dict(
+                    family=fontfamily,
+                    size=title_font_size,
+                ),
+                standoff=0,
+            ),
+            tickfont = dict(
+                family=fontfamily,
+                size=tick_font_size,
+            ),
+            linecolor=linecolor,
+            linewidth=linewidth,
+            mirror=mirror,
+            row=2, col=2
+        )
+
+        # export
+        pio.write_image(fig, self.configs["dir_results"] + "/fig_faultimpact_energy.svg")
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
 
     def whole_process_only_training(self):
         self.create_folder_structure()

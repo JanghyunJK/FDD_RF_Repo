@@ -432,7 +432,9 @@ class FDD_RF_Modeling():
             # add other unit conversions
             print("[Estimating Fault Cost] unit conversion from {} for electricity and {} for natural gas to kWh is not currently supported".format(self.configs['sensor_unit_elec'],configs['sensor_unit_ng']))
             
-        df_combined.to_csv(self.configs['dir_results'] + "/{}_FDD_results.csv".format(self.configs["weather"]))
+        path_impact = self.configs['dir_results'] + "/{}_FDD_results.csv".format(self.configs["weather"])
+        print("[Estimating Fault Cost] saving fault impact estimation summary in {}".format(path_impact))
+        df_combined.to_csv(path_impact)
         self.configs["excess_elec_kWh"] = diff_annual_elec
         self.configs["excess_ng_kWh"] = diff_annual_ng
 
@@ -747,7 +749,9 @@ class FDD_RF_Modeling():
         )
 
         # export
-        pio.write_image(fig, self.configs["dir_results"] + "/fig_faultimpact_energy.svg")
+        path_impact_visual = self.configs["dir_results"] + "/fig_faultimpact.svg"
+        print("[Estimating Fault Cost] saving fault impact estimation figure in {}".format(path_impact_visual))
+        pio.write_image(fig, path_impact_visual)
 
     ################################################################################################
     #----------------------------------------------------------------------------------------------#

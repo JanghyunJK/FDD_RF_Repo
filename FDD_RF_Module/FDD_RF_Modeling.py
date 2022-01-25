@@ -322,6 +322,10 @@ class FDD_RF_Modeling():
 
     def cost_estimation(self):
 
+        # have to install plotly & kaleido
+        # pip install plotly
+        # pip install -U kaleido
+
         # read output file that includes FDD results for every reporting time step
         # convert the FDD results output into simulation timestep
         # read baseline simulation file
@@ -426,17 +430,23 @@ class FDD_RF_Modeling():
         if (self.configs['sensor_unit_ng']=='W') & (self.configs['sensor_unit_elec']=='W'):
             df_monthly = df_combined.groupby(['Month'])[['diff_elec','diff_ng']].sum()/1000 # convert W to kW
             df_monthly = df_combined.groupby(['Month'])[['diff_elec','diff_ng']].sum()/(60/self.configs['cost_est_timestep_min']) #convert kW to kWh
+            base_annual_elec = round(df_combined["baseline_elec_{}".format(self.configs["sensor_unit_elec"])].sum()) # in kWh
+            base_annual_ng = round(df_combined["baseline_ng_{}".format(self.configs["sensor_unit_ng"])].sum()) # in kWh
             diff_annual_elec = round(df_monthly.sum()['diff_elec']) # in kWh
             diff_annual_ng = round(df_monthly.sum()['diff_ng']) # in kWh
+            perc_annual_elec = round(diff_annual_elec/base_annual_elec*100, 3) # in %
+            perc_annual_ng = round(diff_annual_ng/base_annual_ng*100, 3) # in %
         else:
             # add other unit conversions
             print("[Estimating Fault Impact] unit conversion from {} for electricity and {} for natural gas to kWh is not currently supported".format(self.configs['sensor_unit_elec'],configs['sensor_unit_ng']))
             
-        path_impact = self.configs['dir_results'] + "/{}_FDD_results.csv".format(self.configs["weather"])
+        path_impact = self.configs['dir_results'] + "/{}_FDD_impact_table.csv".format(self.configs["weather"])
         print("[Estimating Fault Impact] saving fault impact estimation summary in {}".format(path_impact))
         df_combined.to_csv(path_impact)
         self.configs["excess_elec_kWh"] = diff_annual_elec
         self.configs["excess_ng_kWh"] = diff_annual_ng
+        self.configs["excess_elec_%"] = perc_annual_elec
+        self.configs["excess_ng_%"] = perc_annual_ng 
 
         # plot setting
         linewidth = 0
@@ -445,7 +455,7 @@ class FDD_RF_Modeling():
         title_font_size = 12
         colorbar_font_size = 12
         tick_font_size = 12
-        anot_font_size = 20
+        anot_font_size = 18
         fontfamily = 'verdana'
         barwidth = 0.75
         colorscale=[
@@ -749,7 +759,7 @@ class FDD_RF_Modeling():
         )
 
         # export
-        path_impact_visual = self.configs["dir_results"] + "/fig_faultimpact.svg"
+        path_impact_visual = self.configs['dir_results'] + "/{}_FDD_impact_figure.svg".format(self.configs["weather"])
         print("[Estimating Fault Impact] saving fault impact estimation figure in {}".format(path_impact_visual))
         pio.write_image(fig, path_impact_visual)
 

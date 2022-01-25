@@ -356,7 +356,7 @@ class FDD_RF_Modeling():
         timestamp_last = df_index.index[-1]
 
         # reading baseline simulation results
-        print("[Estimating Fault Cost] reading baseline simulation results")
+        print("[Estimating Fault Impact] reading baseline simulation results")
         df_baseline = pd.read_csv(self.configs['dir_data']+"/"+self.configs['weather']+"/baseline.csv", usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
         df_baseline.columns = [f"baseline_elec_{self.configs['sensor_unit_elec']}",f"baseline_ng_{self.configs['sensor_unit_ng']}"]
         df_baseline.index = df_index.index
@@ -368,7 +368,7 @@ class FDD_RF_Modeling():
 
         # reading individual fault simulation results (based on FDD results) and creating whole year combined results
         count = 1
-        print("[Estimating Fault Cost] combining simulation results from the FDD results")
+        print("[Estimating Fault Impact] combining simulation results from the FDD results")
 
         df_combined_temp = pd.DataFrame()
         for index, row in df_unique.iterrows():
@@ -383,11 +383,11 @@ class FDD_RF_Modeling():
             else:
                 timestamp_end = timestamp_last
                 
-            print(f"[Estimating Fault Cost] prossessing [{row['FaultType']} ({count}/{df_unique.shape[0]})] from the FDD results covering {timestamp_start} to {timestamp_end}")
+            print(f"[Estimating Fault Impact] prossessing [{row['FaultType']} ({count}/{df_unique.shape[0]})] from the FDD results covering {timestamp_start} to {timestamp_end}")
                 
             count_file = 0
             for file in glob.glob(self.configs['dir_data']+"/"+self.configs['weather']+f"/*{row['FaultType']}*"):
-                print(f"[Estimating Fault Cost] reading [{file}] file")
+                print(f"[Estimating Fault Impact] reading [{file}] file")
                 count_file += 1
                 if count_file == 1:
                     df_temp = pd.read_csv(file, usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
@@ -401,7 +401,7 @@ class FDD_RF_Modeling():
                     df_fault += df_temp
                     
             # averaging all fault intensity simulations for a single fault and merging into combined dataframe
-            print(f"[Estimating Fault Cost] averaging all fault intensity simulations for a single fault and merging into combined dataframe")
+            print(f"[Estimating Fault Impact] averaging all fault intensity simulations for a single fault and merging into combined dataframe")
             df_fault = df_fault/count_file
             df_fault = df_fault[timestamp_start:timestamp_end]
             df_combined_temp = pd.concat([df_combined_temp, df_fault])
@@ -430,10 +430,10 @@ class FDD_RF_Modeling():
             diff_annual_ng = round(df_monthly.sum()['diff_ng']) # in kWh
         else:
             # add other unit conversions
-            print("[Estimating Fault Cost] unit conversion from {} for electricity and {} for natural gas to kWh is not currently supported".format(self.configs['sensor_unit_elec'],configs['sensor_unit_ng']))
+            print("[Estimating Fault Impact] unit conversion from {} for electricity and {} for natural gas to kWh is not currently supported".format(self.configs['sensor_unit_elec'],configs['sensor_unit_ng']))
             
         path_impact = self.configs['dir_results'] + "/{}_FDD_results.csv".format(self.configs["weather"])
-        print("[Estimating Fault Cost] saving fault impact estimation summary in {}".format(path_impact))
+        print("[Estimating Fault Impact] saving fault impact estimation summary in {}".format(path_impact))
         df_combined.to_csv(path_impact)
         self.configs["excess_elec_kWh"] = diff_annual_elec
         self.configs["excess_ng_kWh"] = diff_annual_ng
@@ -579,7 +579,7 @@ class FDD_RF_Modeling():
                 colorscale=colorscale, 
                 colorbar = dict(
                     title=dict(
-                        text = "Excess electricty [{}]".format(configs['sensor_unit_elec']),
+                        text = "Excess electricty [{}]".format(self.configs['sensor_unit_elec']),
                         side='right',
                         font=dict(
                             size=colorbar_font_size,
@@ -601,7 +601,7 @@ class FDD_RF_Modeling():
                 colorscale=colorscale, 
                 colorbar = dict(
                     title=dict(
-                        text = "Excess natural gas [{}]".format(configs['sensor_unit_ng']),
+                        text = "Excess natural gas [{}]".format(self.configs['sensor_unit_ng']),
                         side='right',
                         font=dict(
                             size=colorbar_font_size,
@@ -750,7 +750,7 @@ class FDD_RF_Modeling():
 
         # export
         path_impact_visual = self.configs["dir_results"] + "/fig_faultimpact.svg"
-        print("[Estimating Fault Cost] saving fault impact estimation figure in {}".format(path_impact_visual))
+        print("[Estimating Fault Impact] saving fault impact estimation figure in {}".format(path_impact_visual))
         pio.write_image(fig, path_impact_visual)
 
     ################################################################################################

@@ -5,6 +5,7 @@ import json
 # setting directories
 dir_code = "."
 dir_data = "./data"
+dir_results = "./results"
 
 # setting configs json file path
 file_configs = dir_code + "/configs.json"
@@ -18,6 +19,7 @@ with open(file_configs, "r") as read_file:
 configs['dir_data'] = dir_data
 configs['dir_data_test'] = dir_data + "/test_data"
 configs['dir_data_stream'] = dir_data + "/stream_data"
+configs['dir_results'] = dir_results
 
 test_run = FDD_RF_Modeling(configs,
                             weather = configs['weather'], 

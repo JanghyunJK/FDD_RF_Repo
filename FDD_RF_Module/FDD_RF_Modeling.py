@@ -303,7 +303,9 @@ class FDD_RF_Modeling():
         prediction_order = ''.join(self.test_simulation_data_file_list)
         pd.DataFrame(self.output_test_predicted, columns = ['output_test' + prediction_order]).to_csv(f'results/{self.weather}_{self.configs["train_test_apply"]}.csv', index = None)
         logpath = f'results/log.csv'
-        logdf = pd.DataFrame({'randomseed': self.randomseed,
+        logdf = pd.DataFrame({
+                            'time': str(pd.Timestamp.now()),
+                            'randomseed': self.randomseed,
                             'weather': self.weather,
                             'labeling methodology': self.labeling_methodology,
                             'feature selection methodology': self.feature_selection_methodology,
@@ -312,7 +314,8 @@ class FDD_RF_Modeling():
                             'training CDDR': self.training_accuracy_CDDR,
                             'testing CDDR': self.testing_accuracy_CDDR,
                             'testing TPR': self.testing_accuracy_TPR,
-                            'testing FPR': self.testing_accuracy_FPR}, index=[0])
+                            'testing FPR': self.testing_accuracy_FPR
+                            }, index=[0])
         if not os.path.isfile(logpath):
             logdf.to_csv(logpath, mode='a', index=False)
         else:

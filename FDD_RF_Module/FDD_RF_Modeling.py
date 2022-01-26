@@ -233,9 +233,12 @@ class FDD_RF_Modeling():
             self.test_simulation_data_file_list = [x for x in data_file_name_list if '_preformatted' in x]
 
             fault_inputs_output_test = pd.DataFrame([])
+            list_streaming = []
 
             for stream_data_file_name in self.test_simulation_data_file_list:
                 print('[Training/Testing Data Processing] reading stream data for predicting: ' + stream_data_file_name)
+                fault_streaming = stream_data_file_name.split("_preformatted_")[1]
+                list_streaming.append(fault_streaming)
                 temp_stream_FDD_data_test = pd.read_csv(self.configs['dir_data_stream'] + f'\\{stream_data_file_name}')
                 timestep = self.get_timeinterval(temp_stream_FDD_data_test.iloc[:,0]) # in minutes
                 aggregate_n_runs = int(60/timestep*self.configs["fdd_reporting_frequency_hrs"])
@@ -246,13 +249,14 @@ class FDD_RF_Modeling():
                 temp_stream_FDD_data_test = temp_stream_FDD_data_test.copy().iloc[:,0:-1]
                 temp_stream_FDD_data_test = temp_stream_FDD_data_test.groupby(temp_stream_FDD_data_test.index // (aggregate_n_runs)).mean().iloc[:,0:-8]
                 temp_stream_FDD_data_test['label'] = df_label.iloc[:,0].str.strip().values
-                temp_stream_FDD_data_test.to_csv(self.configs['dir_data_stream'] + f'\\{stream_data_file_name.replace("_preformatted","_formatted")}')
+                # temp_stream_FDD_data_test.to_csv(self.configs['dir_data_stream'] + f'\\{stream_data_file_name.replace("_preformatted","_formatted")}')
                 fault_inputs_output_test = pd.concat([fault_inputs_output_test, temp_stream_FDD_data_test], axis = 0)
 
             fault_inputs_output_test = fault_inputs_output_test.reset_index(drop = True)
             self.important_features = pd.read_csv(f'results/important_features_{self.weather}.csv')['important_features'].tolist()
             print('[Testing Data Processing] filtering data only with important features')
             self.inputs_test = fault_inputs_output_test[self.important_features]
+            self.list_streaming = list_streaming
 
             if self.labeling_methodology == 'Simple':
                 self.output_test = fault_inputs_output_test.iloc[:,-1]
@@ -340,405 +344,418 @@ class FDD_RF_Modeling():
         # reading FDD results file
         df_result = pd.read_csv(self.configs["dir_results"] + "/{}_{}.csv".format( self.configs["weather"], self.configs["train_test_apply"] ))
 
-        # creating empty dataframe with timestamp
-        freq = str(self.configs['cost_est_timestep_min']) + 'min'
-        df_combined = pd.DataFrame([])
-        df_combined['reading_time'] = pd.date_range( self.configs['simulation_date_start'], self.configs['simulation_date_end'], freq=freq)
-        df_combined = df_combined.set_index(['reading_time'])[:-1]
+        # reshaping FDD results for each year
+        count_day = 24/self.configs['fdd_reporting_frequency_hrs']
+        count_year = int(365*count_day)
+        num_batchs = int(df_result.shape[0]/count_year)
+        df_result = pd.DataFrame(df_result.values.reshape((count_year,num_batchs)))
 
-        # expanding FDD results into the same user-specified timestep
-        df_result_exp = np.repeat(list(df_result.values), self.configs['fdd_reporting_frequency_hrs']*int(60/self.configs['cost_est_timestep_min']))
-        df_result_exp = pd.DataFrame(df_result_exp)
-        df_result_exp.columns = ['FaultType']
-        df_result_exp.index = df_combined.index
+        # calculating impact for each stream data
+        for count, batch in enumerate(df_result.columns):
 
-        # setting timestamp for raw simulation data
-        freq_raw = str(self.configs['simulation_timestep_min']) + 'min'
-        df_index = pd.DataFrame([])
-        df_index['reading_time'] = pd.date_range( self.configs['simulation_date_start'], self.configs['simulation_date_end'], freq=freq_raw)
-        df_index = df_index.set_index(['reading_time'])[:-1]
-        timestamp_last = df_index.index[-1]
+            # re-reading fault name generated from the synthetic data creation
+            fault_streaming = self.list_streaming[count]
+            print("[Estimating Fault Impact] processing for synthetic data including fault [{}]".format(fault_streaming))
+        
+            # creating empty dataframe with timestamp
+            freq = str(self.configs['cost_est_timestep_min']) + 'min'
+            df_combined = pd.DataFrame([])
+            df_combined['reading_time'] = pd.date_range( self.configs['simulation_date_start'], self.configs['simulation_date_end'], freq=freq)
+            df_combined = df_combined.set_index(['reading_time'])[:-1]
 
-        # reading baseline simulation results
-        print("[Estimating Fault Impact] reading baseline simulation results")
-        df_baseline = pd.read_csv(self.configs['dir_data']+"/"+self.configs['weather']+"/baseline.csv", usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
-        df_baseline.columns = [f"baseline_elec_{self.configs['sensor_unit_elec']}",f"baseline_ng_{self.configs['sensor_unit_ng']}"]
-        df_baseline.index = df_index.index
-        df_baseline = df_baseline.resample(str(self.configs['cost_est_timestep_min'])+"T").mean()
+            # expanding FDD results into the same user-specified timestep
+            df_result_exp = np.repeat(list(df_result[batch].values), self.configs['fdd_reporting_frequency_hrs']*int(60/self.configs['cost_est_timestep_min']))
+            df_result_exp = pd.DataFrame(df_result_exp)
+            df_result_exp.columns = ['FaultType']
+            df_result_exp.index = df_combined.index
 
-        # recreating FDD results with unique fault type (consecutive fault types are removed)
-        df_unique = df_result_exp[(df_result_exp.ne(df_result_exp.shift())).any(axis=1)]
-        df_unique = df_unique.reset_index()
+            # setting timestamp for raw simulation data
+            freq_raw = str(self.configs['simulation_timestep_min']) + 'min'
+            df_index = pd.DataFrame([])
+            df_index['reading_time'] = pd.date_range( self.configs['simulation_date_start'], self.configs['simulation_date_end'], freq=freq_raw)
+            df_index = df_index.set_index(['reading_time'])[:-1]
+            timestamp_last = df_index.index[-1]
 
-        # reading individual fault simulation results (based on FDD results) and creating whole year combined results
-        count = 1
-        print("[Estimating Fault Impact] combining simulation results from the FDD results")
+            # reading baseline simulation results
+            print("[Estimating Fault Impact] reading baseline simulation results")
+            df_baseline = pd.read_csv(self.configs['dir_data']+"/"+self.configs['weather']+"/baseline.csv", usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
+            df_baseline.columns = [f"baseline_elec_{self.configs['sensor_unit_elec']}",f"baseline_ng_{self.configs['sensor_unit_ng']}"]
+            df_baseline.index = df_index.index
+            df_baseline = df_baseline.resample(str(self.configs['cost_est_timestep_min'])+"T").mean()
 
-        df_combined_temp = pd.DataFrame()
-        for index, row in df_unique.iterrows():
-                        
-            # specifying start and stop timestamp for each detected fault
-            rownum_current = df_unique.loc[df_unique.index==index,:].index[0]
-            timestamp_start = df_unique.iloc[rownum_current,:].reading_time
-            if rownum_current+1 < df_unique.shape[0]:
-                timestamp_end = df_unique.iloc[rownum_current+1,:].reading_time - pd.Timedelta(minutes=self.configs["simulation_timestep_min"])
-            else:
-                timestamp_end = timestamp_last
-                
-            print(f"[Estimating Fault Impact] prossessing [{row['FaultType']} ({count}/{df_unique.shape[0]})] from the FDD results covering {timestamp_start} to {timestamp_end}")
-                
-            count_file = 0
-            for file in glob.glob(self.configs['dir_data']+"/"+self.configs['weather']+f"/*{row['FaultType']}*"):
-                print(f"[Estimating Fault Impact] reading [{file}] file")
-                count_file += 1
-                if count_file == 1:
-                    df_temp = pd.read_csv(file, usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
-                    df_temp.index = df_index.index
-                    df_temp = df_temp.resample(str(self.configs['cost_est_timestep_min'])+"T").mean()
-                    df_temp = df_temp[timestamp_start:timestamp_end]
-                    df_fault = df_temp.copy()
+            # recreating FDD results with unique fault type (consecutive fault types are removed)
+            df_unique = df_result_exp[(df_result_exp.ne(df_result_exp.shift())).any(axis=1)]
+            df_unique = df_unique.reset_index()
+
+            # reading individual fault simulation results (based on FDD results) and creating whole year combined results
+            count = 1
+            print("[Estimating Fault Impact] combining simulation results from the FDD results")
+
+            df_combined_temp = pd.DataFrame()
+            for index, row in df_unique.iterrows():
+                            
+                # specifying start and stop timestamp for each detected fault
+                rownum_current = df_unique.loc[df_unique.index==index,:].index[0]
+                timestamp_start = df_unique.iloc[rownum_current,:].reading_time
+                if rownum_current+1 < df_unique.shape[0]:
+                    timestamp_end = df_unique.iloc[rownum_current+1,:].reading_time - pd.Timedelta(minutes=self.configs["simulation_timestep_min"])
                 else:
-                    df_temp = pd.read_csv(file, usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
-                    df_temp.index = df_index.index
-                    df_temp = df_temp.resample(str(self.configs['cost_est_timestep_min'])+"T").mean()
-                    df_temp = df_temp[timestamp_start:timestamp_end]
-                    df_fault += df_temp
+                    timestamp_end = timestamp_last
                     
-            # averaging all fault intensity simulations for a single fault and merging into combined dataframe
-            print(f"[Estimating Fault Impact] averaging all fault intensity simulations for a single fault and merging into combined dataframe")
-            df_fault = df_fault/count_file
-            df_combined_temp = pd.concat([df_combined_temp, df_fault])
-            count+=1
+                print(f"[Estimating Fault Impact] prossessing [{row['FaultType']} ({count}/{df_unique.shape[0]})] from the FDD results covering {timestamp_start} to {timestamp_end}")
+                    
+                count_file = 0
+                for file in glob.glob(self.configs['dir_data']+"/"+self.configs['weather']+f"/*{row['FaultType']}*"):
+                    print(f"[Estimating Fault Impact] reading [{file}] file")
+                    count_file += 1
+                    if count_file == 1:
+                        df_temp = pd.read_csv(file, usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
+                        df_temp.index = df_index.index
+                        df_temp = df_temp.resample(str(self.configs['cost_est_timestep_min'])+"T").mean()
+                        df_temp = df_temp[timestamp_start:timestamp_end]
+                        df_fault = df_temp.copy()
+                    else:
+                        df_temp = pd.read_csv(file, usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
+                        df_temp.index = df_index.index
+                        df_temp = df_temp.resample(str(self.configs['cost_est_timestep_min'])+"T").mean()
+                        df_temp = df_temp[timestamp_start:timestamp_end]
+                        df_fault += df_temp
+                        
+                # averaging all fault intensity simulations for a single fault and merging into combined dataframe
+                print(f"[Estimating Fault Impact] averaging all fault intensity simulations for a single fault and merging into combined dataframe")
+                df_fault = df_fault/count_file
+                df_combined_temp = pd.concat([df_combined_temp, df_fault])
+                count+=1
 
-        # creating combined dataframe from baseline and faulted timeseries data
-        df_combined_temp.columns = [f"faulted_elec_{self.configs['sensor_unit_elec']}",f"faulted_ng_{self.configs['sensor_unit_ng']}"]
-        df_combined_temp.index = pd.to_datetime(df_combined_temp.index)
-        df_combined = pd.merge(df_combined, df_baseline, how='outer', left_index=True, right_index=True)
-        df_combined = pd.merge(df_combined, df_combined_temp, how='outer', left_index=True, right_index=True)
+            # creating combined dataframe from baseline and faulted timeseries data
+            df_combined_temp.columns = [f"faulted_elec_{self.configs['sensor_unit_elec']}",f"faulted_ng_{self.configs['sensor_unit_ng']}"]
+            df_combined_temp.index = pd.to_datetime(df_combined_temp.index)
+            df_combined = pd.merge(df_combined, df_baseline, how='outer', left_index=True, right_index=True)
+            df_combined = pd.merge(df_combined, df_combined_temp, how='outer', left_index=True, right_index=True)
 
-        # creating columns of energy usage differences
-        df_combined['diff_elec'] = df_combined["faulted_elec_{}".format(self.configs["sensor_unit_elec"])] - df_combined["baseline_elec_{}".format(self.configs["sensor_unit_elec"])]
-        df_combined['diff_ng'] = df_combined["faulted_ng_{}".format(self.configs["sensor_unit_ng"])] - df_combined["baseline_ng_{}".format(self.configs["sensor_unit_ng"])]
+            # creating columns of energy usage differences
+            df_combined['diff_elec'] = df_combined["faulted_elec_{}".format(self.configs["sensor_unit_elec"])] - df_combined["baseline_elec_{}".format(self.configs["sensor_unit_elec"])]
+            df_combined['diff_ng'] = df_combined["faulted_ng_{}".format(self.configs["sensor_unit_ng"])] - df_combined["baseline_ng_{}".format(self.configs["sensor_unit_ng"])]
 
-        # creating columns for time, date, and month
-        df_combined['Time'] = pd.to_datetime(df_combined.index).time
-        df_combined['Time'] = df_combined.Time.astype(str).str.rsplit(":",1, expand=True).iloc[:,0]
-        df_combined['Date'] = pd.to_datetime(df_combined.index).date
-        df_combined['Month'] = pd.to_datetime(df_combined.index).month
+            # creating columns for time, date, and month
+            df_combined['Time'] = pd.to_datetime(df_combined.index).time
+            df_combined['Time'] = df_combined.Time.astype(str).str.rsplit(":",1, expand=True).iloc[:,0]
+            df_combined['Date'] = pd.to_datetime(df_combined.index).date
+            df_combined['Month'] = pd.to_datetime(df_combined.index).month
 
-        # calculate monthly and annual excess energy usages
-        if (self.configs['sensor_unit_ng']=='W') & (self.configs['sensor_unit_elec']=='W'):
-            df_monthly = df_combined.groupby(['Month'])[["baseline_elec_{}".format(self.configs["sensor_unit_elec"]),"baseline_ng_{}".format(self.configs["sensor_unit_ng"]),'diff_elec','diff_ng']].sum()/1000/(60/self.configs['cost_est_timestep_min']) #convert W to kWh
-            base_annual_elec = round(df_monthly["baseline_elec_{}".format(self.configs["sensor_unit_elec"])].sum()) # in kWh
-            base_annual_ng = round(df_monthly["baseline_ng_{}".format(self.configs["sensor_unit_ng"])].sum()) # in kWh
-            diff_annual_elec = round(df_monthly.sum()['diff_elec']) # in kWh
-            diff_annual_ng = round(df_monthly.sum()['diff_ng']) # in kWh
-            perc_annual_elec = round(diff_annual_elec/base_annual_elec*100, 3) # in %
-            perc_annual_ng = round(diff_annual_ng/base_annual_ng*100, 3) # in %
-        else:
-            # add other unit conversions
-            print("[Estimating Fault Impact] unit conversion from {} for electricity and {} for natural gas to kWh is not currently supported".format(self.configs['sensor_unit_elec'],self.configs['sensor_unit_ng']))
-            
-        path_impact = self.configs['dir_results'] + "/{}_FDD_impact_table.csv".format(self.configs["weather"])
-        print("[Estimating Fault Impact] saving fault impact estimation summary in {}".format(path_impact))
-        df_combined.to_csv(path_impact)
-        self.configs["excess_elec_kWh"] = diff_annual_elec
-        self.configs["excess_ng_kWh"] = diff_annual_ng
-        self.configs["excess_elec_%"] = perc_annual_elec
-        self.configs["excess_ng_%"] = perc_annual_ng 
+            # calculate monthly and annual excess energy usages
+            if (self.configs['sensor_unit_ng']=='W') & (self.configs['sensor_unit_elec']=='W'):
+                df_monthly = df_combined.groupby(['Month'])[["baseline_elec_{}".format(self.configs["sensor_unit_elec"]),"baseline_ng_{}".format(self.configs["sensor_unit_ng"]),'diff_elec','diff_ng']].sum()/1000/(60/self.configs['cost_est_timestep_min']) #convert W to kWh
+                base_annual_elec = round(df_monthly["baseline_elec_{}".format(self.configs["sensor_unit_elec"])].sum()) # in kWh
+                base_annual_ng = round(df_monthly["baseline_ng_{}".format(self.configs["sensor_unit_ng"])].sum()) # in kWh
+                diff_annual_elec = round(df_monthly.sum()['diff_elec']) # in kWh
+                diff_annual_ng = round(df_monthly.sum()['diff_ng']) # in kWh
+                perc_annual_elec = round(diff_annual_elec/base_annual_elec*100, 3) # in %
+                perc_annual_ng = round(diff_annual_ng/base_annual_ng*100, 3) # in %
+            else:
+                # add other unit conversions
+                print("[Estimating Fault Impact] unit conversion from {} for electricity and {} for natural gas to kWh is not currently supported".format(self.configs['sensor_unit_elec'],self.configs['sensor_unit_ng']))
+                
+            path_impact = self.configs['dir_results'] + "/{}_FDD_impact_table_{}.csv".format(self.configs["weather"], fault_streaming)
+            print("[Estimating Fault Impact] saving fault impact estimation summary in {}".format(path_impact))
+            df_combined.to_csv(path_impact)
+            self.configs["excess_elec_kWh"] = diff_annual_elec
+            self.configs["excess_ng_kWh"] = diff_annual_ng
+            self.configs["excess_elec_%"] = perc_annual_elec
+            self.configs["excess_ng_%"] = perc_annual_ng 
 
-        # plot setting
-        title_font_size = 12
-        colorbar_font_size = 12
-        tick_font_size = 12
-        anot_font_size = 14
-        fontfamily = 'verdana'
-        barwidth = 0.75
-        colorscale=[
-            [0.0, 'rgb(5,48,97)'],
-            [0.1, 'rgb(33,102,172)'],
-            [0.2, 'rgb(67,147,195)'],
-            [0.3, 'rgb(146,197,222)'],
-            [0.4, 'rgb(209,229,240)'],
-            [0.5, 'rgb(247,247,247)'],
-            [0.6, 'rgb(253,219,199)'],
-            [0.7, 'rgb(244,165,130)'],
-            [0.8, 'rgb(214,96,77)'],
-            [0.9, 'rgb(178,24,43)'],
-            [1.0, 'rgb(103,0,31)']
-        ]
-        # colorscale=[
-        #     [0.0, 'rgb(49,54,149)'],
-        #     [0.1, 'rgb(69,117,180)'],
-        #     [0.2, 'rgb(116,173,209)'],
-        #     [0.3, 'rgb(171,217,233)'],
-        #     [0.4, 'rgb(224,243,248)'],
-        #     [0.5, 'rgb(255,242,204)'],
-        #     [0.6, 'rgb(254,224,144)'],
-        #     [0.7, 'rgb(253,174,97)'],
-        #     [0.8, 'rgb(244,109,67)'],
-        #     [0.9, 'rgb(215,48,39)'],
-        #     [1.0, 'rgb(165,0,38)']
-        # ]
-        color_bar = 'rgb(116,173,209)'
-        range_max_elec = max( df_combined['diff_elec'].max() , abs(df_combined['diff_elec'].min()) )
-        range_max_ng = max( df_combined['diff_ng'].max() , abs(df_combined['diff_ng'].min()) )
+            # plot setting
+            title_font_size = 12
+            colorbar_font_size = 12
+            tick_font_size = 12
+            anot_font_size = 14
+            fontfamily = 'verdana'
+            barwidth = 0.75
+            colorscale=[
+                [0.0, 'rgb(5,48,97)'],
+                [0.1, 'rgb(33,102,172)'],
+                [0.2, 'rgb(67,147,195)'],
+                [0.3, 'rgb(146,197,222)'],
+                [0.4, 'rgb(209,229,240)'],
+                [0.5, 'rgb(247,247,247)'],
+                [0.6, 'rgb(253,219,199)'],
+                [0.7, 'rgb(244,165,130)'],
+                [0.8, 'rgb(214,96,77)'],
+                [0.9, 'rgb(178,24,43)'],
+                [1.0, 'rgb(103,0,31)']
+            ]
+            # colorscale=[
+            #     [0.0, 'rgb(49,54,149)'],
+            #     [0.1, 'rgb(69,117,180)'],
+            #     [0.2, 'rgb(116,173,209)'],
+            #     [0.3, 'rgb(171,217,233)'],
+            #     [0.4, 'rgb(224,243,248)'],
+            #     [0.5, 'rgb(255,242,204)'],
+            #     [0.6, 'rgb(254,224,144)'],
+            #     [0.7, 'rgb(253,174,97)'],
+            #     [0.8, 'rgb(244,109,67)'],
+            #     [0.9, 'rgb(215,48,39)'],
+            #     [1.0, 'rgb(165,0,38)']
+            # ]
+            color_bar = 'rgb(116,173,209)'
+            range_max_elec = max( df_combined['diff_elec'].max() , abs(df_combined['diff_elec'].min()) )
+            range_max_ng = max( df_combined['diff_ng'].max() , abs(df_combined['diff_ng'].min()) )
 
 
-        # plotting
-        num_rows = 2
-        num_cols = 3
-        fig = make_subplots(
-            rows=num_rows, 
-            cols=num_cols, 
-            shared_xaxes=True, 
-            vertical_spacing=0.025,
-            horizontal_spacing=0.1,
-            column_widths=[0.2, 0.4, 0.4],
-        )  
+            # plotting
+            num_rows = 2
+            num_cols = 3
+            fig = make_subplots(
+                rows=num_rows, 
+                cols=num_cols, 
+                shared_xaxes=True, 
+                vertical_spacing=0.025,
+                horizontal_spacing=0.1,
+                column_widths=[0.2, 0.4, 0.4],
+            )  
 
-        # heatmap
-        fig.add_trace(go.Heatmap(
-            z=df_combined['diff_elec'],
-            x=df_combined['Date'],
-            y=df_combined['Time'],
-            colorscale='tempo',
-            coloraxis='coloraxis1',
-        ),
-        row=1, col=3)
-        fig.add_trace(go.Heatmap(
-            z=df_combined['diff_ng'],
-            x=df_combined['Date'],
-            y=df_combined['Time'],
-            colorscale='tempo',
-            coloraxis='coloraxis2',
-        ),
-        row=2, col=3)
-
-        # bar chart
-        fig.add_trace(go.Bar(
-            x=df_monthly.index,
-            y=df_monthly['diff_elec'],
-            showlegend=False,
-            width=barwidth,
-            marker=dict(
-                color=color_bar,
-            )
-        ),
-        row=1, col=2)
-        fig.add_trace(go.Bar(
-            x=df_monthly.index,
-            y=df_monthly['diff_ng'],
-            showlegend=False,
-            width=barwidth,
-            marker=dict(
-                color=color_bar,
-            )
-        ),
-        row=2, col=2)
-
-        # annotation
-        if perc_annual_elec > 0:
-            text_elec = "+"
-        else:
-            text_elec = ""
-
-        if perc_annual_ng > 0:
-            text_ng = "+"
-        else:
-            text_ng = ""
-        fig.add_annotation(
-            x=0.08,
-            y=0.75,
-            xref="paper",
-            yref="paper",
-            xanchor='center',
-            yanchor='middle',
-            text="Excess<br>electricity<br><b>{} kWh/year<br>({}{}%)</b>".format(diff_annual_elec, text_elec, perc_annual_elec),
-            font=dict(
-                family=fontfamily,
-                size=anot_font_size,
-                ),
-            showarrow=False,
-            align="right",
-            )
-        fig.add_annotation(
-            x=0.08,
-            y=0.25,
-            xref="paper",
-            yref="paper",
-            xanchor='center',
-            yanchor='middle',
-            text="Excess<br>natural gas<br><b>{} kWh/year<br>({}{}%)</b>".format(diff_annual_ng, text_ng, perc_annual_ng),
-            font=dict(
-                family=fontfamily,
-                size=anot_font_size,
-                ),
-            showarrow=False,
-            align="right",
-            )
-        fig.add_annotation(
-            x=0.2,
-            y=0.75,
-            xref="paper",
-            yref="paper",
-            xanchor='center',
-            yanchor='middle',
-            text="<b>Electricity [kWh]</b>",
-            textangle=270,
-            font=dict(
-                family=fontfamily,
-                size=title_font_size,
-                ),
-            showarrow=False,
-            align="center",
-            )
-        fig.add_annotation(
-            x=0.2,
-            y=0.25,
-            xref="paper",
-            yref="paper",
-            xanchor='center',
-            yanchor='middle',
-            text="<b>Natural gas [kWh]</b>",
-            textangle=270,
-            font=dict(
-                family=fontfamily,
-                size=title_font_size,
-                ),
-            showarrow=False,
-            align="center",
-            )
-
-        # layout
-        fig.update_layout(
-            width=900,
-            height=400,
-            margin=dict(
-                l=0,
-                r=0,
-                t=0,
-                b=0,
+            # heatmap
+            fig.add_trace(go.Heatmap(
+                z=df_combined['diff_elec'],
+                x=df_combined['Date'],
+                y=df_combined['Time'],
+                colorscale='tempo',
+                coloraxis='coloraxis1',
             ),
-            plot_bgcolor='white',
-            coloraxis1=dict(
-                cmin=-range_max_elec,
-                cmid=0,
-                cmax=range_max_elec,
-                colorscale=colorscale, 
-                colorbar = dict(
-                    title=dict(
-                        text = "Excess electricty [{}]".format(self.configs['sensor_unit_elec']),
-                        side='right',
-                        font=dict(
-                            size=colorbar_font_size,
-                            family=fontfamily,
-                        ),
-                    ),
-                    len=0.5,
-                    x=1,
-                    xanchor='left',
-                    y=0.75,
-                    yanchor='middle',
-                    thickness=23,
+            row=1, col=3)
+            fig.add_trace(go.Heatmap(
+                z=df_combined['diff_ng'],
+                x=df_combined['Date'],
+                y=df_combined['Time'],
+                colorscale='tempo',
+                coloraxis='coloraxis2',
+            ),
+            row=2, col=3)
+
+            # bar chart
+            fig.add_trace(go.Bar(
+                x=df_monthly.index,
+                y=df_monthly['diff_elec'],
+                showlegend=False,
+                width=barwidth,
+                marker=dict(
+                    color=color_bar,
                 )
             ),
-            coloraxis2=dict(
-                cmin=-range_max_ng,
-                cmid=0,
-                cmax=range_max_ng,
-                colorscale=colorscale, 
-                colorbar = dict(
-                    title=dict(
-                        text = "Excess natural gas [{}]".format(self.configs['sensor_unit_ng']),
-                        side='right',
-                        font=dict(
-                            size=colorbar_font_size,
-                            family=fontfamily,
-                        ),
+            row=1, col=2)
+            fig.add_trace(go.Bar(
+                x=df_monthly.index,
+                y=df_monthly['diff_ng'],
+                showlegend=False,
+                width=barwidth,
+                marker=dict(
+                    color=color_bar,
+                )
+            ),
+            row=2, col=2)
+
+            # annotation
+            if perc_annual_elec > 0:
+                text_elec = "+"
+            else:
+                text_elec = ""
+
+            if perc_annual_ng > 0:
+                text_ng = "+"
+            else:
+                text_ng = ""
+            fig.add_annotation(
+                x=0.08,
+                y=0.75,
+                xref="paper",
+                yref="paper",
+                xanchor='center',
+                yanchor='middle',
+                text="Excess<br>electricity<br><b>{} kWh/year<br>({}{}%)</b>".format(diff_annual_elec, text_elec, perc_annual_elec),
+                font=dict(
+                    family=fontfamily,
+                    size=anot_font_size,
                     ),
-                    len=0.5,
-                    x=1,
-                    xanchor='left',
-                    y=0.25,
-                    yanchor='middle',
-                    thickness=23,
-                ),
-            ),
-        )
+                showarrow=False,
+                align="right",
+                )
+            fig.add_annotation(
+                x=0.08,
+                y=0.25,
+                xref="paper",
+                yref="paper",
+                xanchor='center',
+                yanchor='middle',
+                text="Excess<br>natural gas<br><b>{} kWh/year<br>({}{}%)</b>".format(diff_annual_ng, text_ng, perc_annual_ng),
+                font=dict(
+                    family=fontfamily,
+                    size=anot_font_size,
+                    ),
+                showarrow=False,
+                align="right",
+                )
+            fig.add_annotation(
+                x=0.2,
+                y=0.75,
+                xref="paper",
+                yref="paper",
+                xanchor='center',
+                yanchor='middle',
+                text="<b>Electricity [kWh]</b>",
+                textangle=270,
+                font=dict(
+                    family=fontfamily,
+                    size=title_font_size,
+                    ),
+                showarrow=False,
+                align="center",
+                )
+            fig.add_annotation(
+                x=0.2,
+                y=0.25,
+                xref="paper",
+                yref="paper",
+                xanchor='center',
+                yanchor='middle',
+                text="<b>Natural gas [kWh]</b>",
+                textangle=270,
+                font=dict(
+                    family=fontfamily,
+                    size=title_font_size,
+                    ),
+                showarrow=False,
+                align="center",
+                )
 
-        # axes
-        for row in range(1, num_rows+1):
-            for col in range(1, num_cols+1):
-                if col==1:
-                    fig.update_yaxes(
-                        showticklabels=False,
-                        row=row, col=col
-                    )      
-                elif col==2:     
-                    fig.update_yaxes(
-                        tickfont = dict(
-                            family=fontfamily,
-                            size=tick_font_size,
-                        ),
-                        row=row, col=col
-                    )
-                elif col==3:
-                    fig.update_yaxes(
-                        title = dict( 
-                            text="<b>Time</b>",
+            # layout
+            fig.update_layout(
+                width=900,
+                height=400,
+                margin=dict(
+                    l=0,
+                    r=0,
+                    t=0,
+                    b=0,
+                ),
+                plot_bgcolor='white',
+                coloraxis1=dict(
+                    cmin=-range_max_elec,
+                    cmid=0,
+                    cmax=range_max_elec,
+                    colorscale=colorscale, 
+                    colorbar = dict(
+                        title=dict(
+                            text = "Excess electricty [{}]".format(self.configs['sensor_unit_elec']),
+                            side='right',
                             font=dict(
+                                size=colorbar_font_size,
                                 family=fontfamily,
-                                size=title_font_size,
                             ),
-                            standoff=0,
                         ),
-                        tickfont = dict(
-                            family=fontfamily,
-                            size=tick_font_size,
+                        len=0.5,
+                        x=1,
+                        xanchor='left',
+                        y=0.75,
+                        yanchor='middle',
+                        thickness=23,
+                    )
+                ),
+                coloraxis2=dict(
+                    cmin=-range_max_ng,
+                    cmid=0,
+                    cmax=range_max_ng,
+                    colorscale=colorscale, 
+                    colorbar = dict(
+                        title=dict(
+                            text = "Excess natural gas [{}]".format(self.configs['sensor_unit_ng']),
+                            side='right',
+                            font=dict(
+                                size=colorbar_font_size,
+                                family=fontfamily,
+                            ),
                         ),
-                        row=row, col=col
-                    )      
-
-        fig.update_xaxes(
-            title = dict( 
-                text="<b>Date</b>",
-                font=dict(
-                    family=fontfamily,
-                    size=title_font_size,
+                        len=0.5,
+                        x=1,
+                        xanchor='left',
+                        y=0.25,
+                        yanchor='middle',
+                        thickness=23,
+                    ),
                 ),
-            ),
-            tickfont = dict(
-                family=fontfamily,
-                size=tick_font_size,
-            ),
-            tickformat="%b",
-            dtick="M2",
-            row=2, col=3
-        )
-        fig.update_xaxes(
-            title = dict( 
-                text="<b>Month</b>",
-                font=dict(
-                    family=fontfamily,
-                    size=title_font_size,
-                ),
-            ),
-            tickfont = dict(
-                family=fontfamily,
-                size=tick_font_size,
-            ),
-            row=2, col=2
-        )
-        fig.update_xaxes(
-            dtick=1,
-            row=1, col=2
-        )
+            )
 
-        # export
-        path_impact_visual = self.configs['dir_results'] + "/{}_FDD_impact_figure.svg".format(self.configs["weather"])
-        print("[Estimating Fault Impact] saving fault impact estimation figure in {}".format(path_impact_visual))
-        pio.write_image(fig, path_impact_visual)
+            # axes
+            for row in range(1, num_rows+1):
+                for col in range(1, num_cols+1):
+                    if col==1:
+                        fig.update_yaxes(
+                            showticklabels=False,
+                            row=row, col=col
+                        )      
+                    elif col==2:     
+                        fig.update_yaxes(
+                            tickfont = dict(
+                                family=fontfamily,
+                                size=tick_font_size,
+                            ),
+                            row=row, col=col
+                        )
+                    elif col==3:
+                        fig.update_yaxes(
+                            title = dict( 
+                                text="<b>Time</b>",
+                                font=dict(
+                                    family=fontfamily,
+                                    size=title_font_size,
+                                ),
+                                standoff=0,
+                            ),
+                            tickfont = dict(
+                                family=fontfamily,
+                                size=tick_font_size,
+                            ),
+                            row=row, col=col
+                        )      
+
+            fig.update_xaxes(
+                title = dict( 
+                    text="<b>Date</b>",
+                    font=dict(
+                        family=fontfamily,
+                        size=title_font_size,
+                    ),
+                ),
+                tickfont = dict(
+                    family=fontfamily,
+                    size=tick_font_size,
+                ),
+                tickformat="%b",
+                dtick="M2",
+                row=2, col=3
+            )
+            fig.update_xaxes(
+                title = dict( 
+                    text="<b>Month</b>",
+                    font=dict(
+                        family=fontfamily,
+                        size=title_font_size,
+                    ),
+                ),
+                tickfont = dict(
+                    family=fontfamily,
+                    size=tick_font_size,
+                ),
+                row=2, col=2
+            )
+            fig.update_xaxes(
+                dtick=1,
+                row=1, col=2
+            )
+
+            # export
+            path_impact_visual = self.configs['dir_results'] + "/{}_FDD_impact_figure_{}.svg".format(self.configs["weather"], fault_streaming)
+            print("[Estimating Fault Impact] saving fault impact estimation figure in {}".format(path_impact_visual))
+            pio.write_image(fig, path_impact_visual)
 
     ################################################################################################
     #----------------------------------------------------------------------------------------------#

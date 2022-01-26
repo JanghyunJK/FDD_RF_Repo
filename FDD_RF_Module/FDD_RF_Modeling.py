@@ -237,7 +237,7 @@ class FDD_RF_Modeling():
 
             for stream_data_file_name in self.test_simulation_data_file_list:
                 print('[Training/Testing Data Processing] reading stream data for predicting: ' + stream_data_file_name)
-                fault_streaming = stream_data_file_name.split("_preformatted_")[1]
+                fault_streaming = stream_data_file_name.split("_preformatted_")[1].replace(".csv","")
                 list_streaming.append(fault_streaming)
                 temp_stream_FDD_data_test = pd.read_csv(self.configs['dir_data_stream'] + f'\\{stream_data_file_name}')
                 timestep = self.get_timeinterval(temp_stream_FDD_data_test.iloc[:,0]) # in minutes
@@ -500,7 +500,6 @@ class FDD_RF_Modeling():
             color_bar = 'rgb(116,173,209)'
             range_max_elec = max( df_combined['diff_elec'].max() , abs(df_combined['diff_elec'].min()) )
             range_max_ng = max( df_combined['diff_ng'].max() , abs(df_combined['diff_ng'].min()) )
-
 
             # plotting
             num_rows = 2

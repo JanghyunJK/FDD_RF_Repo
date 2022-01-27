@@ -10,7 +10,7 @@
  "feature_selection_methodology":"Embedded",
  "number_of_trees":500,
  "simulation_timestep_min":10,
- "fdd_reporting_frequency_hrs":24,
+ "fdd_reporting_frequency_hrs":3,
  "split_test_size":0.2,
  "train_test_apply": "apply",
  "sensor_name_elec": "electricity_facility [W]",

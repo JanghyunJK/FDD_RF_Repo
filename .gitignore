@@ -2,7 +2,7 @@
 run/data/**/*.csv
 run/models/*.sav
 run/results/*Norfolk*.csv
-run/results/*_impact_table.csv
-run/results/*_impact_figure.svg
+run/results/*_impact_table*.csv
+run/results/*_impact_figure*.svg
 JupyterNotebook/*.csv
 JupyterNotebook/figures

@@ -4,13 +4,13 @@ import pickle
 import numpy as np
 import pandas as pd
 import json
+import math
+import requests
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import mean_squared_error
 from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.model_selection import train_test_split
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import plotly.io as pio
+import visualization as viz
 
 class FDD_RF_Modeling():
     """
@@ -338,6 +338,98 @@ class FDD_RF_Modeling():
     #----------------------------------------------------------------------------------------------#
     ################################################################################################
 
+    def gas_rate(self, site_id, startyear, endyear):
+    
+        headers = {'Content-type': 'application/json'}
+        data = json.dumps({"seriesid": [site_id],"startyear":startyear, "endyear":endyear})
+        
+        p = requests.post('https://api.bls.gov/publicAPI/v1/timeseries/data/', data=data, headers=headers)
+        json_data = json.loads(p.text)
+        df_gas = pd.DataFrame()
+        for series in json_data['Results']['series']:
+        
+            i = 0
+            for item in series['data']:
+                year = item['year']
+                period = item['period']
+                value = item['value']
+                footnotes=""
+                for footnote in item['footnotes']:
+                    if footnote:
+                        footnotes = footnotes + footnote['text'] + ','
+            
+                if 'M01' <= period <= 'M12':
+                    df_gas.at[i,'year'] = year
+                    df_gas.at[i,'period'] = period
+                    df_gas.at[i,'value'] = value
+                i = i+1
+
+        years = df_gas['year'].unique()          
+        
+        for year in years:
+            df_gas_filtered = df_gas.loc[df_gas['year']==year]
+            if len(df_gas_filtered) == 12:
+                break
+        return df_gas_filtered
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
+    def utilRates(self, df,utility,sector,name):  # Electric
+
+        df_filtered = df.loc[df['utility'] ==utility]
+        df_filtered = df_filtered.loc[df_filtered['sector'] ==sector]
+        df_filtered = df_filtered.loc[df_filtered['name'] == name]
+        df_filtered['startdate'] = pd.to_datetime(df_filtered['startdate'], format='%m/%d/%Y %H:%M')
+        df_filtered.sort_values(by='startdate')
+        df_final = df_filtered.iloc[-1:].reset_index()
+        cols = df_final.columns
+        
+        # filtering energy rates
+        energyrates = [col for col in cols if 'energyratestructure' in col ]
+        df_energyrates = df_final[energyrates]
+        df_energyrates=df_energyrates.dropna(axis=1)
+        
+        # filtering demand rates
+        demandrates = [col for col in cols if 'demandratestructure' in col ]
+        df_demandrates = df_final[demandrates]
+        df_demandrates=df_demandrates.dropna(axis=1)
+        
+        df_fixed_rate = df_final['fixedchargefirstmeter'] 
+            
+        schedules = ['demandweekdayschedule', 'demandweekendschedule', 'energyweekdayschedule', 'energyweekendschedule']
+        for schedule in  schedules:  
+
+            demandSchedule_updated= df_final[schedule].str.split(",")
+            demandSchedule_updated_1 =[ str(row).replace("L","") for row in demandSchedule_updated.values]
+            demandSchedule_updated_1 =[ str(row).replace("]","") for row in demandSchedule_updated_1]
+            demandSchedule_updated_1 =[ str(row).replace("[","") for row in demandSchedule_updated_1]
+            demandSchedule_updated_1 =[ str(row).replace("'","") for row in demandSchedule_updated_1]
+            demandSchedule_updated_final= demandSchedule_updated_1[0].split(",")
+            
+            df_periods = pd.DataFrame()
+            for i in range(0, len(demandSchedule_updated_final)):
+                month = math.floor(i/24) + 1
+                hrs = i - math.floor(i/24)*24
+                df_periods.at[month,'hr'+str(hrs)] = int(demandSchedule_updated_final[i])
+            df_periods.index.names = ['Months']
+            if schedule == 'demandweekdayschedule':
+                df_periods_demand_weekday = df_periods
+            elif schedule == 'demandweekendschedule':
+                df_periods_demand_weekend = df_periods
+            elif schedule == 'energyweekdayschedule':
+                df_periods_energy_weekday = df_periods
+            elif schedule == 'energyweekendschedule':
+                df_periods_energy_weekend = df_periods
+
+        return [df_periods_demand_weekday, df_periods_demand_weekend, df_periods_energy_weekday, df_periods_energy_weekend,df_energyrates,df_demandrates,df_fixed_rate]  
+
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
     def impact_estimation(self):
 
         # have to install plotly & kaleido
@@ -347,13 +439,18 @@ class FDD_RF_Modeling():
         # read output file that includes FDD results for every reporting time step
         # convert the FDD results output into simulation timestep
         # read baseline simulation file
-        # read faulted simulation file(s)
+        # read faulted simulation file
         # calculate electricity usage difference
         # calculate natural gas usage difference
         # calculate thermal comfort difference - TBD
-        # convert electricity/gas to $ - TBD
+        # convert electricity/gas to $
         # convert thermal comfort to $ - TBD
-        # report and visulize results
+        # calculate cost expense difference
+        # calcualte thermal comfrt difference - TBD
+
+        #------------------------------------------------------------#
+        # recreating timeseries simulation data based on FDD results
+        #------------------------------------------------------------#
 
         # reading FDD results file
         df_result = pd.read_csv(self.configs["dir_results"] + "/{}_{}.csv".format( self.configs["weather"], self.configs["train_test_apply"] ))
@@ -445,131 +542,131 @@ class FDD_RF_Modeling():
         df_combined['Month'] = pd.to_datetime(df_combined.index).month
         df_combined = df_combined.dropna()
 
-        # calculate monthly and annual excess energy usages
-        if (self.configs['sensor_unit_ng']=='W') & (self.configs['sensor_unit_elec']=='W'):
-            df_monthly = df_combined.groupby(['Month'])[["baseline_elec_{}".format(self.configs["sensor_unit_elec"]),"baseline_ng_{}".format(self.configs["sensor_unit_ng"]),'diff_elec','diff_ng']].sum()/1000/(60/self.configs['impact_est_timestep_min']) #convert W to kWh
-            base_annual_elec = round(df_monthly["baseline_elec_{}".format(self.configs["sensor_unit_elec"])].sum()) # in kWh
-            base_annual_ng = round(df_monthly["baseline_ng_{}".format(self.configs["sensor_unit_ng"])].sum()) # in kWh
-            diff_annual_elec = round(df_monthly.sum()['diff_elec']) # in kWh
-            diff_annual_ng = round(df_monthly.sum()['diff_ng']) # in kWh
-            perc_annual_elec = round(diff_annual_elec/base_annual_elec*100, 3) # in %
-            perc_annual_ng = round(diff_annual_ng/base_annual_ng*100, 3) # in %
-        else:
-            # add other unit conversions
-            print("[Estimating Fault Impact] unit conversion from {} for electricity and {} for natural gas to kWh is not currently supported".format(self.configs['sensor_unit_elec'],self.configs['sensor_unit_ng']))
+        #------------------------------------------------------------#
+        # calculating energy costs
+        #------------------------------------------------------------#
 
+        # reading utility values from utility database
+        df_rates = pd.read_csv(self.configs['dir_data'] + '/cost_data/utility_data.csv')
+        [df_periods_demand_weekday, df_periods_demand_weekend, df_periods_energy_weekday, df_periods_energy_weekend,df_energyrates,df_demandrates,df_fixed_rate] = self.utilRates(df_rates, self.configs['rate_elec_utility'], self.configs['rate_elec_sector'], self.configs['rate_elec_name'])  
+        df_combined['baseline_ng_therms'] = df_combined['baseline_ng_W']* 0.034130/1000
+        df_combined['faulted_ng_therms'] = df_combined['faulted_ng_W']* 0.034130/1000   
+        df_combined = df_combined.reset_index()
+
+        # electricity cost estimation - demand/peak
+        dict_month = {
+            1:31,
+            2:28,
+            3:31,
+            4:30,
+            5:31,
+            6:30,
+            7:31,
+            8:31,
+            9:30,
+            10:31,
+            11:30,
+            12:31
+        }
+        df_combined_monthly = df_combined.groupby(by="Month").sum()
+        df_combined_monthly['rate_elec_subscription_cost_$'] = [df_fixed_rate[0]]*df_combined_monthly.shape[0]
+        cases = ['baseline_elec_W','faulted_elec_W']
+        for case in cases:
+            title = case + '_demand_cost_$'
+            for month in dict_month.keys():
+                df_month = df_combined.loc[df_combined['Month'] == month]
+                if df_month.shape[0] == 0:
+                    continue
+                df_peak =df_month[df_month[case] == df_month[case].max()].reset_index()
+                df_peak_hour = df_peak['reading_time'][0].hour
+                if df_peak.reading_time.dt.weekday.iloc[0] <= 4: #weekday
+                    columns = df_periods_demand_weekday.columns
+                    for col in columns:
+                        if str(df_peak_hour) in col:
+                            col_needed = col
+                            break
+                    filtered_col_demand = df_periods_demand_weekday[col_needed]     
+                    rate_needed_demand = filtered_col_demand.loc[month]
+                else: # weekend
+                    columns = df_periods_demand_weekend.columns
+                    for col in columns:
+                        if str(df_peak_hour) in col:
+                            col_needed = col
+                            break
+                    filtered_col_demand = df_periods_demand_weekend[col_needed]     
+                    rate_needed_demand = filtered_col_demand.loc[month]   
+                rate_cost = 0
+                for col in df_demandrates.columns: 
+                    if 'period'+str(int(rate_needed_demand)) in col:
+                        rate_cost = rate_cost + df_demandrates[col][0]
+                demand_cost = rate_cost * df_month[case].max()/1000
+                df_combined_monthly.at[month,title] = demand_cost 
+        df_combined_monthly = df_combined_monthly.rename(columns={'baseline_elec_W_demand_cost_$':'baseline_elec_demand_cost_$', 'faulted_elec_W_demand_cost_$':'faulted_elec_demand_cost_$'})
+        df_combined_monthly = df_combined_monthly.reset_index()
+        df_combined['baseline_elec_demand_cost_$'] = 0
+        df_combined['faulted_elec_demand_cost_$'] = 0
+        for mnth in df_combined.Month.unique():
+            df_combined.loc[df_combined.Month == mnth, 'baseline_elec_demand_cost_$'] = df_combined_monthly.loc[df_combined_monthly.Month==mnth, 'baseline_elec_demand_cost_$'].iloc[0] / dict_month[mnth]
+            df_combined.loc[df_combined.Month == mnth, 'faulted_elec_demand_cost_$'] = df_combined_monthly.loc[df_combined_monthly.Month==mnth, 'faulted_elec_demand_cost_$'].iloc[0] / dict_month[mnth]
+
+        # electricity cost estimation - energy 
+        for i in range(0,len(df_combined)):
+            month = df_combined['reading_time'][i].month
+            hr = df_combined['reading_time'][i].hour
+            if df_combined['reading_time'][i].weekday() <= 4: #weekday
+                columns = df_periods_energy_weekday.columns
+                for col in columns:
+                    if str(hr) in col:
+                        col_needed = col
+                        break
+                filtered_col_kwh = df_periods_energy_weekday[col_needed]
+                rate_needed_kwh = filtered_col_kwh.loc[month]        
+                df_combined.at[i,'rate_kwh'] = rate_needed_kwh
+            else: # weekend
+                columns = df_periods_energy_weekend.columns
+                for col in columns:
+                    if str(hr) in col:
+                        col_needed = col
+                        break
+                filtered_col_kwh = df_periods_energy_weekend[col_needed]
+                rate_needed_kwh = filtered_col_kwh.loc[month]
+                df_combined.at[i,'rate_kwh'] = rate_needed_kwh
+            rate_cost = 0
+            for col in df_energyrates.columns: 
+                if 'period'+str(int(rate_needed_kwh)) in col:
+                    rate_cost = rate_cost + df_energyrates[col][0]
+            df_combined.at[i,'baseline_elec_energy_cost_$'] = rate_cost * df_combined['baseline_elec_W'][i]/1000
+            df_combined.at[i,'faulted_elec_energy_cost_$'] = rate_cost * df_combined['faulted_elec_W'][i]/1000    
+
+        # gas cost estimation 
+        df_gas_rate = self.gas_rate(self.configs['rate_ng_siteid'], self.configs['rate_ng_year_start'], self.configs['rate_ng_year_end'])
+        df_gas_rate['Month'] = df_gas_rate.period.str.split("M", expand=True).iloc[:,1].astype(float)
+        df_combined = pd.merge(df_combined, df_gas_rate[['Month','value']], on='Month')
+        df_combined['value'] = df_combined['value'].astype(float)
+        df_combined = df_combined.rename(columns={'value':'rate_ng_$_per_therm'})
+        df_combined['baseline_ng_cost_$'] = df_combined.baseline_ng_therms * df_combined['rate_ng_$_per_therm']
+        df_combined['faulted_ng_cost_$'] = df_combined.faulted_ng_therms * df_combined['rate_ng_$_per_therm']
+
+        # total cost estimation
+        df_combined['diff_elec_cost_$'] = ( df_combined['faulted_elec_demand_cost_$'] + df_combined['faulted_elec_energy_cost_$'] ) - ( df_combined['baseline_elec_demand_cost_$'] + df_combined['baseline_elec_energy_cost_$'] )
+        df_combined['diff_ng_cost_$'] = df_combined['faulted_ng_cost_$'] - df_combined['baseline_ng_cost_$']
+        df_combined['diff_cost_$'] = df_combined['diff_elec_cost_$'] + df_combined['diff_ng_cost_$']
+
+        # impact summary
         df_impact = pd.DataFrame()
+        df_impact['fault_duration_ratio'] = df_combined.groupby(['fdd_result']).Date.count() / df_combined.shape[0]
         df_impact['impact_site_energy_elec_kWh'] = df_combined.groupby(['fdd_result']).diff_elec.sum()/1000 # in kWh
         df_impact['impact_site_energy_ng_kWh'] = df_combined.groupby(['fdd_result']).diff_ng.sum()/1000 # in kWh
-        df_impact['fault_duration_ratio'] = df_combined.groupby(['fdd_result']).Date.count() / df_combined.shape[0]
+        df_impact['impact_cost_$'] = df_combined.groupby(['fdd_result'])[['diff_cost_$']].sum() # in $
         df_impact = df_impact.reset_index()
 
         #------------------------------------------------------------#
-        # plot setting
+        # visualization
         #------------------------------------------------------------#
-        title_font_size = 12
-        tick_font_size = 12
-        fontfamily = 'Times New Roman'
-        barwidth = 0.75
-        colorscale = ['rgb(215,25,28)','rgb(253,174,97)','rgb(171,221,164)','rgb(43,131,186)']
 
-        fig = make_subplots(
-            rows=1, 
-            cols=4, 
-            shared_yaxes=True, 
-            horizontal_spacing=0.05,
-        )  
-
-        list_plot = [
-            'fault_duration_ratio',
-            'impact_site_energy_elec_kWh',
-            'impact_site_energy_ng_kWh',
-            'fault_duration_ratio'
-        ]
-
-        list_title_x = [
-            "<b>Diagnosis<br>ratio [-]</b>",
-            "<b>Excess<br>electricity [kWh]</b>",
-            "<b>Excess<br>natural gas [kWh]</b>",
-            "<b>Excess<br>cost [$]</b>"
-        ]
-
-        #------------------------------------------------------------#
-        # bar plots
-        #------------------------------------------------------------#
-        col=0
-
-        for plot in list_plot:
-            
-            fig.add_trace(go.Bar(
-                x=df_impact[plot],
-                y=df_impact.fdd_result,
-                text=round(df_impact[plot],2),
-                textfont_family=fontfamily,
-                orientation='h',
-                marker=dict(
-                    color=colorscale[col],
-                    line=dict(color='black', width=1)
-                ),
-                showlegend=False,
-                width=barwidth,
-            ),row=1,col=col+1)
-            
-            col+=1
-
-        #------------------------------------------------------------#
-        # axes
-        #------------------------------------------------------------#
-        col=1
-
-        for title in list_title_x:
-
-            fig.update_xaxes(
-                title = dict( 
-                    text=title,
-                    font=dict(
-                        family=fontfamily,
-                        size=title_font_size,
-                    ),
-                ),
-                tickfont = dict(
-                    family=fontfamily,
-                    size=tick_font_size,
-                ),
-                zeroline=True,
-                zerolinewidth=1,
-                zerolinecolor='black',
-                row=1, col=col
-            )
-            
-            col+=1
-            
-        fig.update_yaxes(
-            tickfont = dict(
-                family=fontfamily,
-                size=tick_font_size,
-            ),
-        )
-
-        #------------------------------------------------------------#
-        # axes
-        #------------------------------------------------------------#
-        fig.update_layout(
-            width=800,
-            height=400,
-            margin=dict(
-                l=200,
-                r=0,
-                t=0,
-                b=50,
-            ),
-            plot_bgcolor='white',
-        )
-
-        # export
-        path_impact_visual = self.configs['dir_results'] + "/{}_FDD_impact_figure.svg".format(self.configs["weather"])
-        print("[Estimating Fault Impact] saving fault impact estimation figure in {}".format(path_impact_visual))
-        pio.write_image(fig, path_impact_visual)
+        viz.fault_impact_sum(df_impact, self.configs)
+        viz.fault_impact_heatmap_power(df_combined, self.configs)
+        viz.fault_impact_heatmap_cost(df_combined, self.configs)
 
 
     ################################################################################################

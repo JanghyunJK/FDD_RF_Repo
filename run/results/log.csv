@@ -77,3 +77,10 @@ time,randomseed,weather,labeling methodology,feature selection methodology,numbe
 ,7568,Norfolk,Simple,Embedded,500,3,0.968117183,0.766211286,1,0
 ,587,Norfolk,Simple,Embedded,500,3,0.968414979,0.765820429,1,0
 5:43:03 PM,1,Norfolk,Simple,Embedded,500,3,na,0.964139344,1,0
+2022-02-03 16:51:40.444061,1043,Norfolk,Simple,Embedded,2000,12,0.9780747468731388,0.5506998213222156,1.0,0.0
+2022-02-04 10:25:28.859587,1,Norfolk,Simple,Embedded,2000,12,na,1.0,1.0,0.0
+2022-02-04 11:10:46.248944,1,Norfolk,Simple,Embedded,2000,12,na,1.0,1.0,0.0
+2022-02-04 12:23:54.480883,1,Norfolk,Simple,Embedded,2000,12,na,1.0,1.0,0.0
+2022-02-07 09:55:19.814941,1,Norfolk,Simple,Embedded,2000,12,na,0.8360655737704918,1.0,0.0
+2022-02-07 10:18:26.327067,1,Norfolk,Simple,Embedded,2000,12,na,0.8360655737704918,1.0,0.0
+2022-02-07 15:54:20.026782,1,Norfolk,Simple,Embedded,2000,12,na,0.8360655737704918,1.0,0.0

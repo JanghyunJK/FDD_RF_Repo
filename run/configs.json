@@ -22,10 +22,10 @@
  "impact_est_timestep_min": 60,
  "streamdata_date_start": "2006-05-01 00:00:00",
  "streamdata_date_end": "2006-09-01 00:00:00",
- "rate_elec_utility":"Virginia Electric & Power Co",
- "rate_elec_sector":"Commercial",
- "rate_elec_name":"GS-2T Time-of-Use",
- "rate_ng_siteid":"APU035072620",
- "rate_ng_year_start":"2018",
- "rate_ng_year_end":"2021"
+ "rate_elec_utility": "Virginia Electric & Power Co",
+ "rate_elec_sector": "Commercial",
+ "rate_elec_name": "GS-2T Time-of-Use",
+ "rate_ng_siteid": "APU035072620",
+ "rate_ng_year_start": "2018",
+ "rate_ng_year_end": "2021"
 }

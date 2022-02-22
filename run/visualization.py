@@ -368,7 +368,7 @@ def fault_impact_heatmap_power(df_combined, configs):
 
 def fault_impact_heatmap_cost(df_combined, configs):
 
-    df_monthly = df_combined.groupby(['Month'])[["baseline_elec_demand_cost_$","baseline_elec_energy_cost_$","diff_elec_cost_$","diff_ng_cost_$"]].sum()
+    df_monthly = df_combined.groupby(['Month'])[["baseline_elec_demand_cost_$","baseline_elec_energy_cost_$","baseline_ng_cost_$","diff_elec_cost_$","diff_ng_cost_$"]].sum()
     base_annual_elec = round( df_monthly["baseline_elec_demand_cost_$"].sum() + df_monthly["baseline_elec_energy_cost_$"].sum() ) # in $
     base_annual_ng = round(df_monthly["baseline_ng_cost_$"].sum()) # in $
     diff_annual_elec = round(df_monthly.sum()['diff_elec_cost_$']) # in $

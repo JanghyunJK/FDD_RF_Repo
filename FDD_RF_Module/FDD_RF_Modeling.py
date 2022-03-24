@@ -1,14 +1,21 @@
 import os
+import glob
 import pickle
 import numpy as np
 import pandas as pd
+import json
+import math
+import requests
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import mean_squared_error
 from sklearn.feature_selection import SelectKBest, f_classif
+from sklearn.model_selection import train_test_split
+import visualization as viz
 
 class FDD_RF_Modeling():
     """
     parameters:
+        configs: configuration file including settings for the workflow
         weather: the weather under which the building is simulated. Select from
             'AK_Fairbanks', 'FL_Miami', 'KY_Louisville', 'MN_Duluth',
             'SAU_Riyadh', 'TN_Knoxville', 'VA_Richmond'. The default value is
@@ -25,10 +32,7 @@ class FDD_RF_Modeling():
             means using Random Forest's embedded feature selection to pre-select
              features. 'Filter' means using ANOVA correlation to select high
              correlated features. The default value is 'None'.
-        aggregate_n_runs: Time resolution of FDD models. n = 1 represents 15
-            minutes time resolution, which is the highest time resolution. n = 4
-             represents 60 minutes time resolution. n = 96 represents daily time
-              resolution. The default value is 4.
+        fdd_reporting_frequency_hrs: FDD reporting frequency in hours
         number_of_trees: number of trees in the random forest algorithm
 
     functions:
@@ -45,16 +49,51 @@ class FDD_RF_Modeling():
             training and testing
 
     """
-    def __init__(self, weather = 'TN_Knoxville', labeling_methodolog = 'Simple',
-     feature_selection_methodology = 'None', aggregate_n_runs = 4,
-     number_of_trees = 20):
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
+    def __init__(self, configs, weather = 'TN_Knoxville', labeling_methodology = 'Simple',
+     feature_selection_methodology = 'None', fdd_reporting_frequency_hrs = 4,
+     number_of_trees = 20, randomseed=2021):
+        self.configs = configs
         self.weather = weather
-        self.labeling_methodolog = labeling_methodolog
+        self.labeling_methodology = labeling_methodology
         self.feature_selection_methodology = feature_selection_methodology
         self.number_of_trees = number_of_trees
-        self.aggregate_n_runs = aggregate_n_runs
+        self.fdd_reporting_frequency_hrs = fdd_reporting_frequency_hrs
+        self.randomseed = randomseed
         self.root_path = os.getcwd()
 
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
+    def update_configs(self):
+        path = os.path.join(self.configs['dir_code'], "configs.json")
+        with open(path, 'w') as fp:
+            json.dump(self.configs, fp, indent=1)
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
+    def get_timeinterval(self, os_timestamp):
+    
+        #converting timestamp to pandas datetime
+        timestamp = pd.to_datetime(os_timestamp)
+        # inferring timestep (frequency) from the dataframe
+        dt = timestamp.diff().value_counts().idxmax() # in pandas timedelta
+        dt = int(dt.value/(10**9)/60) # in minutes
+        print("[Training/Testing Data Processing] timestep ({} min) inferred from the dataframe".format(dt))
+        return dt
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+    
     def CDDR_tot(self, Real_label, Pred_label):
         CD, CP = 0, 0
         for i,j in zip(Real_label,Pred_label):
@@ -62,40 +101,80 @@ class FDD_RF_Modeling():
                 CD += 1
             if i != 'baseline':
                 CP += 1
-        CDDR_tot = CD / CP
+        if CP ==0:
+            CDDR_tot = 0
+        else:
+            CDDR_tot = CD / CP
         return CDDR_tot
 
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
+    def TPR_FPR_tot(self, Real_label, Pred_label):
+        TP, FP, TCP = 0, 0, 0
+        for i,j in zip(Real_label,Pred_label):
+            if (i != ('baseline')) & (j != ('baseline')):
+                TP += 1
+            if (i == {'baseline'}) & (j != ('baseline')):
+                FP += 1
+            if i != 'baseline':
+                TCP += 1
+        TPR = TP / TCP
+        FPR = FP / TCP
+        return TPR, FPR
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
     def create_folder_structure(self):
-        print('Creating folder structure...')
+        print('[Preprocessing] creating folder structure...')
         folders = ['models/', 'results/', 'data/']
         for folder in folders:
             if not os.path.exists(os.path.join(self.root_path, folder)):
                 os.makedirs(os.path.join(self.root_path, folder))
 
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
     def inputs_output_generator(self, train_or_test):
-        print(f'Generating inputs for {train_or_test}ing...')
+        print(f'[Training/Testing Data Processing] generating inputs for {train_or_test}ing...')
 
         if train_or_test == 'train':
             # read and aggregate raw data
-            data_file_name_list = os.listdir(f'data\\{self.weather}\\{self.weather}\\')
-            meta_data_file_name = [x for x in data_file_name_list if '_sensors' not in x][0]
-            simulation_data_file_list = [x for x in data_file_name_list if '_sensors' in x]
-            meta_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{meta_data_file_name}')
+            data_file_name_list = [os.path.basename(x) for x in glob.glob(f"data\\{(self.weather)}\\*.csv")]
+            meta_data_file_name = [x for x in data_file_name_list if '_metadata' in x][0]
+            simulation_data_file_list = [x for x in data_file_name_list if '_metadata' not in x]
+            meta_data = pd.read_csv(f'data\\{self.weather}\\{meta_data_file_name}')
+
+            print('[Training/Testing Data Processing] metadata filename: ' + meta_data_file_name)
 
             fault_inputs_output = pd.DataFrame([])
+            fault_inputs_output_test = pd.DataFrame([])
 
             for simulation_data_file_name in simulation_data_file_list:
-                temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{simulation_data_file_name}')
-                temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (self.aggregate_n_runs)).mean().iloc[:,0:-8]
-                temp_raw_FDD_data['label'] = meta_data.loc[meta_data.id == simulation_data_file_name[0:-12]].fault_type.values[0]
-                fault_inputs_output = pd.concat([fault_inputs_output, temp_raw_FDD_data], axis = 0)
+                print('[Training/Testing Data Processing] reading data (for both training and testing): ' + simulation_data_file_name)
+                temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{simulation_data_file_name}')
+                timestep = self.get_timeinterval(temp_raw_FDD_data.iloc[:,0]) # in minutes
+                aggregate_n_runs = int(60/timestep*self.configs["fdd_reporting_frequency_hrs"])
+                temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (aggregate_n_runs)).mean().iloc[:,0:-8]
+                temp_raw_FDD_data['label'] = meta_data.loc[meta_data.sensor_filename == simulation_data_file_name[0:-4]].fault_type.values[0]
+                # Splitting training and testing data
+                temp_raw_FDD_data_train, temp_raw_FDD_data_test = train_test_split(temp_raw_FDD_data, test_size=self.configs["split_test_size"], random_state=np.random.RandomState(self.randomseed))
+                fault_inputs_output = pd.concat([fault_inputs_output, temp_raw_FDD_data_train], axis = 0)
+                print('[Training/Testing Data Processing] split and save testing data for ' + simulation_data_file_name)
+                temp_raw_FDD_data_test.to_csv(self.configs['dir_data_test'] + f'\\{simulation_data_file_name}')
 
+            ind = pd.DataFrame(temp_raw_FDD_data_test.index.tolist())
+            ind.to_csv(self.configs['dir_data_test'] + f'\\{self.weather}_ind.csv')
             fault_inputs_output = fault_inputs_output.reset_index(drop = True)
 
             # Calculating outputs based on labeling methodology
-            if self.labeling_methodolog == 'Simple':
+            if self.labeling_methodology == 'Simple':
                 self.output_train = fault_inputs_output.iloc[:,-1]
-            elif self.labeling_methodolog == 'Energy_Difference':
+            elif self.labeling_methodology == 'Energy_Difference':
                 pd.set_option('mode.chained_assignment', None)
                 electricity_gas_label_df = fault_inputs_output[['electricity_facility [W]', 'gas_facility [W]', 'label']]
                 baseline_electricity = electricity_gas_label_df.loc[electricity_gas_label_df.label == 'baseline']['electricity_facility [W]']
@@ -111,7 +190,7 @@ class FDD_RF_Modeling():
                 electricity_gas_label_df['adjusted_label'] = electricity_gas_label_df['adjusted_label'].replace('', 'baseline')
                 self.output_train = electricity_gas_label_df['adjusted_label'].rename('label')
             else:
-                raise Exception("Error! Enter either 'Simple' or 'Energy_Difference' for labeling_methodolog")
+                raise Exception("Error! Enter either 'Simple' or 'Energy_Difference' for labeling_methodology")
 
             # Calculating inputs based on feature selection methods
             if self.feature_selection_methodology == 'None':
@@ -137,29 +216,73 @@ class FDD_RF_Modeling():
             # This method is introduced in https://www.sciencedirect.com/science/article/abs/pii/S0360132320307071
             else:
                 raise Exception("Error! Enter either 'None', 'Embedded' or 'Filter' for feature_selection_methodology")
+            pd.DataFrame(self.important_features, columns = ['important_features']).to_csv(f'results/important_features_{self.weather}.csv', index = None)
 
         elif train_or_test == 'test':
             # read and aggregate tesing data
-            test_data_file_name_list = os.listdir(f'data\\testing_data\\')
-            self.test_simulation_data_file_list = [x for x in test_data_file_name_list if '_sensors' in x]
+            test_data_file_name_list = [os.path.basename(x) for x in glob.glob(self.configs['dir_data_test'] + '/*.csv')]
+            self.test_simulation_data_file_list = [x for x in test_data_file_name_list if '_ind' not in x]
 
-            fault_inputs = pd.DataFrame([])
+            fault_inputs_output_test = pd.DataFrame([])
 
             for simulation_data_file_name in self.test_simulation_data_file_list:
-                temp_raw_FDD_data = pd.read_csv(f'data\\{self.weather}\\{self.weather}\\{simulation_data_file_name}')
-                temp_raw_FDD_data = temp_raw_FDD_data.groupby(temp_raw_FDD_data.index // (self.aggregate_n_runs)).mean().iloc[:,0:-8]
-                fault_inputs = pd.concat([fault_inputs, temp_raw_FDD_data], axis = 0)
+                print('[Testing Data Processing] reading testing data ' + simulation_data_file_name)
+                temp_raw_FDD_data_test = pd.read_csv(self.configs['dir_data_test'] + f'\\{simulation_data_file_name}')
+                fault_inputs_output_test = pd.concat([fault_inputs_output_test, temp_raw_FDD_data_test], axis = 0)
 
-            fault_inputs = fault_inputs.reset_index(drop = True)
-            self.inputs_test = fault_inputs[self.important_features]
+            fault_inputs_output_test = fault_inputs_output_test.reset_index(drop = True)
+            self.important_features = pd.read_csv(f'results/important_features_{self.weather}.csv')['important_features'].tolist()
+            print('[Testing Data Processing] filtering data only with important features')
+            self.inputs_test = fault_inputs_output_test[self.important_features]
+
+            if self.labeling_methodology == 'Simple':
+                self.output_test = fault_inputs_output_test.iloc[:,-1]
+
+        elif train_or_test == 'apply':
+            # read stream data and reformat to use as an input to the FDD model
+            stream_data_file_list = glob.glob(self.configs['dir_data_stream'] + f"\\*_preformatted_*.csv")
+            if len(stream_data_file_list) == 1:
+                stream_data_file_name = stream_data_file_list[0]
+            else:
+                print(f"[Training/Testing Data Processing] there are more than one file saved under {self.configs['dir_data_stream']}")
+
+            print('[Training/Testing Data Processing] reading stream data for predicting: ' + stream_data_file_name)
+            temp_stream_FDD_data_test = pd.read_csv(f'{stream_data_file_name}')
+            timestep = self.get_timeinterval(temp_stream_FDD_data_test.iloc[:,0]) # in minutes
+            aggregate_n_runs = int(60/timestep*self.configs["fdd_reporting_frequency_hrs"])
+            df_label = temp_stream_FDD_data_test.set_index("OS_time").iloc[:,-1:]
+            df_label.index = pd.to_datetime(df_label.index)
+            streamdata_date_start = pd.to_datetime(df_label.index[0])
+            streamdata_date_end = pd.to_datetime(df_label.index[-1]) + pd.Timedelta(str(self.configs['simulation_timestep_min'])+"m") # this is definitely not a good way..
+            self.configs['streamdata_date_start'] = str(streamdata_date_start)
+            self.configs['streamdata_date_end'] = str(streamdata_date_end)
+
+            resample_frequency = str(self.configs["fdd_reporting_frequency_hrs"]) + "H"
+            df_label = df_label.resample(resample_frequency).bfill() # bfill() might not work for all cases
+            temp_stream_FDD_data_test = temp_stream_FDD_data_test.copy().iloc[:,0:-1]
+            temp_stream_FDD_data_test = temp_stream_FDD_data_test.groupby(temp_stream_FDD_data_test.index // (aggregate_n_runs)).mean().iloc[:,0:-8]
+            temp_stream_FDD_data_test['label'] = df_label.iloc[:,0].str.strip().values
+
+            fault_inputs_output_test = temp_stream_FDD_data_test.reset_index(drop = True)
+            self.important_features = pd.read_csv(f'results/important_features_{self.weather}.csv')['important_features'].tolist()
+            print('[Testing Data Processing] filtering data only with important features')
+            self.inputs_test = fault_inputs_output_test[self.important_features]
+            self.test_simulation_data_file_list = [stream_data_file_name]
+
+            if self.labeling_methodology == 'Simple':
+                self.output_test = fault_inputs_output_test.iloc[:,-1]
 
         else:
             raise Exception("Error! Enter either 'train' or 'test' for train_or_test")
 
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
     def get_models(self, train_or_load_model):
 
         if train_or_load_model == 'train':
-            print(f'Training Model...')
+            print(f'[Training Model] training model...')
 
             FDD_model = RandomForestClassifier(n_estimators = self.number_of_trees, random_state=42)
             FDD_model.fit(self.inputs_train, self.output_train)
@@ -168,22 +291,387 @@ class FDD_RF_Modeling():
             self.training_accuracy_CDDR = self.CDDR_tot(self.output_train, self.output_train_predicted)
             self.model = FDD_model
             pickle.dump(self.model, open(f'models/{self.weather}.sav', 'wb'))
-            print(f'Training Model Completed! Training Accuracy (CDDRtotal) is : {self.training_accuracy_CDDR}')
+            print(f'[Training Model] training model completed! training Accuracy (CDDRtotal) is : {self.training_accuracy_CDDR}')
             # Module to be finished: cross-validation performance
 
         elif train_or_load_model == 'load':
-            print(f'Loading Model...')
+            print(f'[Applying Trained Model] loading model...')
             self.model = pickle.load(open(f'models/{self.weather}.sav', 'rb'))
-            print('Loading Model Completed!')
+            print('[Applying Trained Model] loading model completed!')
+
         else:
             raise Exception ("Error! Enter either 'train' or 'load' for train_or_load_model")
 
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
     def make_predictions(self):
-        self.output_test = self.model.predict(self.inputs_test)
+        print('[Applying Trained Model] make and saving predictions...')
+        self.output_test_predicted = self.model.predict(self.inputs_test)
+        self.testing_accuracy_CDDR = self.CDDR_tot(self.output_test, self.output_test_predicted)
+        self.testing_accuracy_TPR, self.testing_accuracy_FPR = self.TPR_FPR_tot(self.output_test, self.output_test_predicted)
         prediction_order = ''.join(self.test_simulation_data_file_list)
-        pd.DataFrame(self.output_test, columns = ['output_test' + prediction_order]).to_csv(f'results/{self.weather}.csv', index = None)
-        print('Make and saving predictions...')
+        pd.DataFrame(self.output_test_predicted, columns = ['output_test' + prediction_order]).to_csv(f'results/{self.weather}_{self.configs["train_test_apply"]}.csv', index = None)
+        logpath = f'results/log.csv'
+        logdf = pd.DataFrame({
+                            'time': str(pd.Timestamp.now()),
+                            'randomseed': self.randomseed,
+                            'weather': self.weather,
+                            'labeling methodology': self.labeling_methodology,
+                            'feature selection methodology': self.feature_selection_methodology,
+                            'number of trees': self.number_of_trees,
+                            'fdd reporting frequency hrs': self.fdd_reporting_frequency_hrs,
+                            'training CDDR': self.training_accuracy_CDDR,
+                            'testing CDDR': self.testing_accuracy_CDDR,
+                            'testing TPR': self.testing_accuracy_TPR,
+                            'testing FPR': self.testing_accuracy_FPR
+                            }, index=[0])
+        if not os.path.isfile(logpath):
+            logdf.to_csv(logpath, mode='a', index=False)
+        else:
+            logdf.to_csv(logpath, mode='a', index=False, header=False)
+        print(f'[Applying Trained Model] applying model completed! testing Accuracy (CDDRtotal) is : {self.testing_accuracy_CDDR}')
         print('Whole Process Completed!')
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
+    def gas_rate(self, site_id, startyear, endyear):
+    
+        headers = {'Content-type': 'application/json'}
+        data = json.dumps({"seriesid": [site_id],"startyear":startyear, "endyear":endyear})
+        
+        p = requests.post('https://api.bls.gov/publicAPI/v1/timeseries/data/', data=data, headers=headers)
+        json_data = json.loads(p.text)
+        df_gas = pd.DataFrame()
+        for series in json_data['Results']['series']:
+        
+            i = 0
+            for item in series['data']:
+                year = item['year']
+                period = item['period']
+                value = item['value']
+                footnotes=""
+                for footnote in item['footnotes']:
+                    if footnote:
+                        footnotes = footnotes + footnote['text'] + ','
+            
+                if 'M01' <= period <= 'M12':
+                    df_gas.at[i,'year'] = year
+                    df_gas.at[i,'period'] = period
+                    df_gas.at[i,'value'] = value
+                i = i+1
+
+        years = df_gas['year'].unique()          
+        
+        for year in years:
+            df_gas_filtered = df_gas.loc[df_gas['year']==year]
+            if len(df_gas_filtered) == 12:
+                break
+        return df_gas_filtered
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
+    def utilRates(self, df,utility,sector,name):  # Electric
+
+        df_filtered = df.loc[df['utility'] ==utility]
+        df_filtered = df_filtered.loc[df_filtered['sector'] ==sector]
+        df_filtered = df_filtered.loc[df_filtered['name'] == name]
+        df_filtered['startdate'] = pd.to_datetime(df_filtered['startdate'], format='%m/%d/%Y %H:%M')
+        df_filtered.sort_values(by='startdate')
+        df_final = df_filtered.iloc[-1:].reset_index()
+        cols = df_final.columns
+        
+        # filtering energy rates
+        energyrates = [col for col in cols if 'energyratestructure' in col ]
+        df_energyrates = df_final[energyrates]
+        df_energyrates=df_energyrates.dropna(axis=1)
+        
+        # filtering demand rates
+        demandrates = [col for col in cols if 'demandratestructure' in col ]
+        df_demandrates = df_final[demandrates]
+        df_demandrates=df_demandrates.dropna(axis=1)
+        
+        df_fixed_rate = df_final['fixedchargefirstmeter'] 
+            
+        schedules = ['demandweekdayschedule', 'demandweekendschedule', 'energyweekdayschedule', 'energyweekendschedule']
+        for schedule in  schedules:  
+
+            demandSchedule_updated= df_final[schedule].str.split(",")
+            demandSchedule_updated_1 =[ str(row).replace("L","") for row in demandSchedule_updated.values]
+            demandSchedule_updated_1 =[ str(row).replace("]","") for row in demandSchedule_updated_1]
+            demandSchedule_updated_1 =[ str(row).replace("[","") for row in demandSchedule_updated_1]
+            demandSchedule_updated_1 =[ str(row).replace("'","") for row in demandSchedule_updated_1]
+            demandSchedule_updated_final= demandSchedule_updated_1[0].split(",")
+            
+            df_periods = pd.DataFrame()
+            for i in range(0, len(demandSchedule_updated_final)):
+                month = math.floor(i/24) + 1
+                hrs = i - math.floor(i/24)*24
+                df_periods.at[month,'hr'+str(hrs)] = int(demandSchedule_updated_final[i])
+            df_periods.index.names = ['Months']
+            if schedule == 'demandweekdayschedule':
+                df_periods_demand_weekday = df_periods
+            elif schedule == 'demandweekendschedule':
+                df_periods_demand_weekend = df_periods
+            elif schedule == 'energyweekdayschedule':
+                df_periods_energy_weekday = df_periods
+            elif schedule == 'energyweekendschedule':
+                df_periods_energy_weekend = df_periods
+
+        return [df_periods_demand_weekday, df_periods_demand_weekend, df_periods_energy_weekday, df_periods_energy_weekend,df_energyrates,df_demandrates,df_fixed_rate]  
+
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
+
+    def impact_estimation(self):
+
+        # have to install plotly & kaleido
+        # pip install plotly
+        # pip install -U kaleido
+
+        # read output file that includes FDD results for every reporting time step
+        # convert the FDD results output into simulation timestep
+        # read baseline simulation file
+        # read faulted simulation file
+        # calculate electricity usage difference
+        # calculate natural gas usage difference
+        # calculate thermal comfort difference - TBD
+        # convert electricity/gas to $
+        # convert thermal comfort to $ - TBD
+        # calculate cost expense difference
+        # calcualte thermal comfrt difference - TBD
+
+        #------------------------------------------------------------#
+        # recreating timeseries simulation data based on FDD results
+        #------------------------------------------------------------#
+
+        # reading FDD results file
+        df_result = pd.read_csv(self.configs["dir_results"] + "/{}_{}.csv".format( self.configs["weather"], self.configs["train_test_apply"] ))
+
+        # creating empty dataframe with timestamp
+        freq = str(self.configs['impact_est_timestep_min']) + 'min'
+        df_combined = pd.DataFrame([])
+        df_combined['reading_time'] = pd.date_range( self.configs['streamdata_date_start'], self.configs['streamdata_date_end'], freq=freq)
+        df_combined = df_combined.set_index(['reading_time'])[:-1]
+        timestamp_last = df_combined.index[-1]
+
+        # expanding FDD results into the same user-specified timestep
+        df_result_exp = np.repeat(list(df_result.values), self.configs['fdd_reporting_frequency_hrs']*int(60/self.configs['impact_est_timestep_min']))
+        df_result_exp = pd.DataFrame(df_result_exp)
+        df_result_exp.columns = ['FaultType']
+        df_result_exp.index = df_combined.index
+
+        # setting timestamp for raw simulation data
+        freq_raw = str(self.configs['simulation_timestep_min']) + 'min'
+        df_index = pd.DataFrame([])
+        df_index['reading_time'] = pd.date_range( self.configs['simulation_date_start'], self.configs['simulation_date_end'], freq=freq_raw)
+        df_index = df_index.set_index(['reading_time'])[:-1]
+
+        # reading baseline simulation results
+        print("[Estimating Fault Impact] reading baseline simulation results")
+        df_baseline = pd.read_csv(self.configs['dir_data']+"/"+self.configs['weather']+"/baseline.csv", usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
+        df_baseline.columns = [f"baseline_elec_{self.configs['sensor_unit_elec']}",f"baseline_ng_{self.configs['sensor_unit_ng']}"]
+        df_baseline.index = df_index.index
+        df_baseline = df_baseline.resample(str(self.configs['impact_est_timestep_min'])+"T").mean()
+
+        # recreating FDD results with unique fault type (consecutive fault types are removed)
+        df_unique = df_result_exp[(df_result_exp.ne(df_result_exp.shift())).any(axis=1)]
+        df_unique = df_unique.reset_index()
+
+        # reading individual fault simulation results (based on FDD results) and creating whole year combined results
+        count = 1
+        print("[Estimating Fault Impact] combining simulation results from the FDD results")
+        df_combined_temp = pd.DataFrame()
+        for index, row in df_unique.iterrows():
+
+            # specifying start and stop timestamp for each detected fault
+            rownum_current = df_unique.loc[df_unique.index==index,:].index[0]
+            timestamp_start = df_unique.iloc[rownum_current,:].reading_time
+            if rownum_current+1 < df_unique.shape[0]:
+                timestamp_end = df_unique.iloc[rownum_current+1,:].reading_time - pd.Timedelta(minutes=self.configs["simulation_timestep_min"])
+            else:
+                timestamp_end = timestamp_last
+
+            print(f"[Estimating Fault Impact] prossessing [{row['FaultType']} ({count}/{df_unique.shape[0]})] from the FDD results covering {timestamp_start} to {timestamp_end}")
+
+            count_file = 0
+            for file in glob.glob(self.configs['dir_data']+"/"+self.configs['weather']+f"/*{row['FaultType']}*"):
+                print(f"[Estimating Fault Impact] reading [{file}] file")
+                count_file += 1
+                if count_file == 1:
+                    df_temp = pd.read_csv(file, usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
+                    df_temp.index = df_index.index
+                    df_temp = df_temp.resample(str(self.configs['impact_est_timestep_min'])+"T").mean()
+                    df_temp = df_temp[timestamp_start:timestamp_end]
+                    df_fault = df_temp.copy()
+                else:
+                    df_temp = pd.read_csv(file, usecols=[self.configs['sensor_name_elec'], self.configs['sensor_name_ng']])
+                    df_temp.index = df_index.index
+                    df_temp = df_temp.resample(str(self.configs['impact_est_timestep_min'])+"T").mean()
+                    df_temp = df_temp[timestamp_start:timestamp_end]
+                    df_fault += df_temp
+
+            # averaging all fault intensity simulations for a single fault and merging into combined dataframe
+            print(f"[Estimating Fault Impact] averaging all fault intensity simulations for a single fault and merging into combined dataframe")
+            df_fault = df_fault/count_file
+            df_fault['fdd_result'] = row['FaultType']
+            df_combined_temp = pd.concat([df_combined_temp, df_fault])
+            count+=1
+
+        # creating combined dataframe from baseline and faulted timeseries data
+        df_combined_temp.columns = [f"faulted_elec_{self.configs['sensor_unit_elec']}",f"faulted_ng_{self.configs['sensor_unit_ng']}", "fdd_result"]
+        df_combined_temp.index = pd.to_datetime(df_combined_temp.index)
+        df_combined = pd.merge(df_combined, df_baseline, how='outer', left_index=True, right_index=True)
+        df_combined = pd.merge(df_combined, df_combined_temp, how='outer', left_index=True, right_index=True)
+
+        # creating columns of energy usage differences
+        df_combined['diff_elec'] = df_combined["faulted_elec_{}".format(self.configs["sensor_unit_elec"])] - df_combined["baseline_elec_{}".format(self.configs["sensor_unit_elec"])]
+        df_combined['diff_ng'] = df_combined["faulted_ng_{}".format(self.configs["sensor_unit_ng"])] - df_combined["baseline_ng_{}".format(self.configs["sensor_unit_ng"])]
+
+        # creating columns for time, date, and month
+        df_combined['Time'] = pd.to_datetime(df_combined.index).time
+        df_combined['Time'] = df_combined.Time.astype(str).str.rsplit(":",1, expand=True).iloc[:,0]
+        df_combined['Date'] = pd.to_datetime(df_combined.index).date
+        df_combined['Month'] = pd.to_datetime(df_combined.index).month
+        df_combined = df_combined.dropna()
+
+        #------------------------------------------------------------#
+        # calculating energy costs
+        #------------------------------------------------------------#
+
+        # reading utility values from utility database
+        df_rates = pd.read_csv(self.configs['dir_data'] + '/cost_data/utility_data.csv')
+        [df_periods_demand_weekday, df_periods_demand_weekend, df_periods_energy_weekday, df_periods_energy_weekend,df_energyrates,df_demandrates,df_fixed_rate] = self.utilRates(df_rates, self.configs['rate_elec_utility'], self.configs['rate_elec_sector'], self.configs['rate_elec_name'])  
+        df_combined['baseline_ng_therms'] = df_combined['baseline_ng_W']* 0.034130/1000
+        df_combined['faulted_ng_therms'] = df_combined['faulted_ng_W']* 0.034130/1000   
+        df_combined = df_combined.reset_index()
+
+        # electricity cost estimation - demand/peak
+        dict_month = {
+            1:31,
+            2:28,
+            3:31,
+            4:30,
+            5:31,
+            6:30,
+            7:31,
+            8:31,
+            9:30,
+            10:31,
+            11:30,
+            12:31
+        }
+        df_combined_monthly = df_combined.groupby(by="Month").sum()
+        df_combined_monthly['rate_elec_subscription_cost_$'] = [df_fixed_rate[0]]*df_combined_monthly.shape[0]
+        cases = ['baseline_elec_W','faulted_elec_W']
+        for case in cases:
+            title = case + '_demand_cost_$'
+            for month in dict_month.keys():
+                df_month = df_combined.loc[df_combined['Month'] == month]
+                if df_month.shape[0] == 0:
+                    continue
+                df_peak =df_month[df_month[case] == df_month[case].max()].reset_index()
+                df_peak_hour = df_peak['reading_time'][0].hour
+                if df_peak.reading_time.dt.weekday.iloc[0] <= 4: #weekday
+                    columns = df_periods_demand_weekday.columns
+                    for col in columns:
+                        if str(df_peak_hour) in col:
+                            col_needed = col
+                            break
+                    filtered_col_demand = df_periods_demand_weekday[col_needed]     
+                    rate_needed_demand = filtered_col_demand.loc[month]
+                else: # weekend
+                    columns = df_periods_demand_weekend.columns
+                    for col in columns:
+                        if str(df_peak_hour) in col:
+                            col_needed = col
+                            break
+                    filtered_col_demand = df_periods_demand_weekend[col_needed]     
+                    rate_needed_demand = filtered_col_demand.loc[month]   
+                rate_cost = 0
+                for col in df_demandrates.columns: 
+                    if 'period'+str(int(rate_needed_demand)) in col:
+                        rate_cost = rate_cost + df_demandrates[col][0]
+                demand_cost = rate_cost * df_month[case].max()/1000
+                df_combined_monthly.at[month,title] = demand_cost 
+        df_combined_monthly = df_combined_monthly.rename(columns={'baseline_elec_W_demand_cost_$':'baseline_elec_demand_cost_$', 'faulted_elec_W_demand_cost_$':'faulted_elec_demand_cost_$'})
+        df_combined_monthly = df_combined_monthly.reset_index()
+        df_combined['baseline_elec_demand_cost_$'] = 0
+        df_combined['faulted_elec_demand_cost_$'] = 0
+        for mnth in df_combined.Month.unique():
+            df_combined.loc[df_combined.Month == mnth, 'baseline_elec_demand_cost_$'] = df_combined_monthly.loc[df_combined_monthly.Month==mnth, 'baseline_elec_demand_cost_$'].iloc[0] / dict_month[mnth]
+            df_combined.loc[df_combined.Month == mnth, 'faulted_elec_demand_cost_$'] = df_combined_monthly.loc[df_combined_monthly.Month==mnth, 'faulted_elec_demand_cost_$'].iloc[0] / dict_month[mnth]
+
+        # electricity cost estimation - energy 
+        for i in range(0,len(df_combined)):
+            month = df_combined['reading_time'][i].month
+            hr = df_combined['reading_time'][i].hour
+            if df_combined['reading_time'][i].weekday() <= 4: #weekday
+                columns = df_periods_energy_weekday.columns
+                for col in columns:
+                    if str(hr) in col:
+                        col_needed = col
+                        break
+                filtered_col_kwh = df_periods_energy_weekday[col_needed]
+                rate_needed_kwh = filtered_col_kwh.loc[month]        
+                df_combined.at[i,'rate_kwh'] = rate_needed_kwh
+            else: # weekend
+                columns = df_periods_energy_weekend.columns
+                for col in columns:
+                    if str(hr) in col:
+                        col_needed = col
+                        break
+                filtered_col_kwh = df_periods_energy_weekend[col_needed]
+                rate_needed_kwh = filtered_col_kwh.loc[month]
+                df_combined.at[i,'rate_kwh'] = rate_needed_kwh
+            rate_cost = 0
+            for col in df_energyrates.columns: 
+                if 'period'+str(int(rate_needed_kwh)) in col:
+                    rate_cost = rate_cost + df_energyrates[col][0]
+            df_combined.at[i,'baseline_elec_energy_cost_$'] = rate_cost * df_combined['baseline_elec_W'][i]/1000
+            df_combined.at[i,'faulted_elec_energy_cost_$'] = rate_cost * df_combined['faulted_elec_W'][i]/1000    
+
+        # gas cost estimation 
+        df_gas_rate = self.gas_rate(self.configs['rate_ng_siteid'], self.configs['rate_ng_year_start'], self.configs['rate_ng_year_end'])
+        df_gas_rate['Month'] = df_gas_rate.period.str.split("M", expand=True).iloc[:,1].astype(float)
+        df_combined = pd.merge(df_combined, df_gas_rate[['Month','value']], on='Month')
+        df_combined['value'] = df_combined['value'].astype(float)
+        df_combined = df_combined.rename(columns={'value':'rate_ng_$_per_therm'})
+        df_combined['baseline_ng_cost_$'] = df_combined.baseline_ng_therms * df_combined['rate_ng_$_per_therm']
+        df_combined['faulted_ng_cost_$'] = df_combined.faulted_ng_therms * df_combined['rate_ng_$_per_therm']
+
+        # total cost estimation
+        df_combined['diff_elec_cost_$'] = ( df_combined['faulted_elec_demand_cost_$'] + df_combined['faulted_elec_energy_cost_$'] ) - ( df_combined['baseline_elec_demand_cost_$'] + df_combined['baseline_elec_energy_cost_$'] )
+        df_combined['diff_ng_cost_$'] = df_combined['faulted_ng_cost_$'] - df_combined['baseline_ng_cost_$']
+        df_combined['diff_cost_$'] = df_combined['diff_elec_cost_$'] + df_combined['diff_ng_cost_$']
+
+        # impact summary
+        df_impact = pd.DataFrame()
+        df_impact['fault_duration_ratio'] = df_combined.groupby(['fdd_result']).Date.count() / df_combined.shape[0]
+        df_impact['impact_site_energy_elec_kWh'] = df_combined.groupby(['fdd_result']).diff_elec.sum()/1000 # in kWh
+        df_impact['impact_site_energy_ng_kWh'] = df_combined.groupby(['fdd_result']).diff_ng.sum()/1000 # in kWh
+        df_impact['impact_cost_$'] = df_combined.groupby(['fdd_result'])[['diff_cost_$']].sum() # in $
+        df_impact = df_impact.reset_index()
+
+        #------------------------------------------------------------#
+        # visualization
+        #------------------------------------------------------------#
+
+        viz.fault_impact_sum(df_impact, self.configs)
+        viz.fault_impact_heatmap_power(df_combined, self.configs)
+        viz.fault_impact_heatmap_cost(df_combined, self.configs)
+
+
+    ################################################################################################
+    #----------------------------------------------------------------------------------------------#
+    ################################################################################################
 
     def whole_process_only_training(self):
         self.create_folder_structure()
@@ -201,4 +689,15 @@ class FDD_RF_Modeling():
         self.create_folder_structure()
         self.get_models(train_or_load_model = 'load')
         self.inputs_output_generator(train_or_test = 'test')
+        self.training_accuracy_CDDR = "na"
         self.make_predictions()
+
+    def whole_process_applying_and_costing(self):
+        self.create_folder_structure()
+        self.get_models(train_or_load_model = 'load')
+        self.inputs_output_generator(train_or_test = 'apply')
+        self.training_accuracy_CDDR = "na"
+        self.make_predictions()
+        self.impact_estimation()
+        self.update_configs()
+        

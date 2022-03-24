@@ -1,3 +1,0 @@
-This is an example testing data
-
-Make sure the testing data is in the same format as the training data csv file in data/weather/weather/...

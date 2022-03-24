@@ -1,8 +1,0 @@
-# training data
-run/data/**/*.csv
-run/models/*.sav
-run/results/*Norfolk*.csv
-run/results/*_impact_*.csv
-run/results/*.svg
-JupyterNotebook/*.csv
-JupyterNotebook/figures
